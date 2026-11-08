@@ -3060,6 +3060,12 @@ nautilus_window_slot_stop_loading (NautilusWindowSlot *self)
     end_location_change (self);
 }
 
+GtkWidget *
+nautilus_window_slot_get_columns (NautilusWindowSlot *self)
+{
+    return self->columns;
+}
+
 NautilusFilesView *
 nautilus_window_slot_get_current_view (NautilusWindowSlot *self)
 {

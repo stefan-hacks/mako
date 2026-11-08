@@ -22,6 +22,7 @@
 #include "nautilus-file.h"
 #include "nautilus-files-view.h"
 #include "nautilus-labels.h"
+#include "nautilus-list-base.h"
 #include "nautilus-view-info.h"
 #include "nautilus-window-slot.h"
 
@@ -48,7 +49,22 @@ struct _NautilusColumns
 
     GFile *shown_location;
     guint update_id;
+
+    /* Columns mode, per tab. New tabs start the way the last one was set. */
+    gboolean enabled;
+    guint mode;
+    double wheel_amount;
+    gint64 wheel_quiet_until;
 };
+
+enum
+{
+    PROP_0,
+    PROP_MODE,
+    N_PROPS
+};
+
+static GParamSpec *properties[N_PROPS];
 
 G_DEFINE_TYPE (NautilusColumns, nautilus_columns, GTK_TYPE_WIDGET)
 
@@ -57,7 +73,7 @@ columns_on (NautilusColumns *self)
 {
     NautilusFilesView *view;
 
-    if (self->slot == NULL || !g_settings_get_boolean (nautilus_flier_settings (), "columns-view"))
+    if (self->slot == NULL || !self->enabled)
     {
         return FALSE;
     }
@@ -422,22 +438,163 @@ schedule_update (NautilusColumns *self)
     }
 }
 
-static void
-on_columns_setting (NautilusColumns *self)
+static NautilusFilesView *
+files_view (NautilusColumns *self)
 {
-    NautilusFilesView *view = self->slot != NULL ? nautilus_window_slot_get_current_view (self->slot) : NULL;
+    return self->slot != NULL ? nautilus_window_slot_get_current_view (self->slot) : NULL;
+}
 
-    /* Columns go with the list. */
-    if (g_settings_get_boolean (nautilus_flier_settings (), "columns-view") && view != NULL &&
-        nautilus_files_view_get_view_id (view) == NAUTILUS_VIEW_GRID_ID &&
-        gtk_widget_get_mapped (GTK_WIDGET (self)))
+static guint
+compute_mode (NautilusColumns *self)
+{
+    NautilusFilesView *view = files_view (self);
+
+    if (view != NULL && nautilus_files_view_get_view_id (view) == NAUTILUS_VIEW_GRID_ID)
     {
-        gtk_widget_activate_action (GTK_WIDGET (self->slot), "slot.files-view-mode", "u",
-                                    NAUTILUS_VIEW_LIST_ID);
+        return NAUTILUS_COLUMNS_MODE_GRID;
+    }
+
+    return self->enabled ? NAUTILUS_COLUMNS_MODE_COLUMNS : NAUTILUS_COLUMNS_MODE_LIST;
+}
+
+static void
+on_view_changed (NautilusColumns *self)
+{
+    NautilusFilesView *view = files_view (self);
+    guint mode;
+
+    /* Columns go with the list: back from the grid is the plain list. */
+    if (view != NULL && nautilus_files_view_get_view_id (view) == NAUTILUS_VIEW_GRID_ID)
+    {
+        self->enabled = FALSE;
+    }
+
+    mode = compute_mode (self);
+    if (mode != self->mode)
+    {
+        self->mode = mode;
+        g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_MODE]);
+    }
+
+    schedule_update (self);
+}
+
+guint
+nautilus_columns_get_mode (NautilusColumns *self)
+{
+    return self->mode;
+}
+
+void
+nautilus_columns_set_mode (NautilusColumns *self,
+                           guint            mode)
+{
+    NautilusFilesView *view = files_view (self);
+    guint view_id = mode == NAUTILUS_COLUMNS_MODE_GRID ? NAUTILUS_VIEW_GRID_ID : NAUTILUS_VIEW_LIST_ID;
+
+    g_return_if_fail (mode >= NAUTILUS_COLUMNS_MODE_LIST && mode <= NAUTILUS_COLUMNS_MODE_GRID);
+
+    if (view == NULL)
+    {
+        return;
+    }
+
+    self->enabled = mode == NAUTILUS_COLUMNS_MODE_COLUMNS;
+    if (g_settings_get_boolean (nautilus_flier_settings (), "columns-view") != self->enabled)
+    {
+        g_settings_set_boolean (nautilus_flier_settings (), "columns-view", self->enabled);
     }
 
     g_clear_object (&self->shown_location);
-    schedule_update (self);
+    if (nautilus_files_view_get_view_id (view) != view_id)
+    {
+        /* Notifies the icon name, which lands in on_view_changed (). */
+        gtk_widget_activate_action (GTK_WIDGET (self->slot), "slot.files-view-mode", "u", view_id);
+    }
+    on_view_changed (self);
+}
+
+/* Like the wheel: list, columns, grid, then bigger grid items; and back. */
+void
+nautilus_columns_step (NautilusColumns *self,
+                       int              direction)
+{
+    NautilusFilesView *view = files_view (self);
+    guint mode = self->mode;
+
+    if (view == NULL || direction == 0)
+    {
+        return;
+    }
+
+    if (mode == NAUTILUS_COLUMNS_MODE_GRID)
+    {
+        NautilusListBase *base = nautilus_files_view_get_private_list_base (view);
+        NautilusViewInfo info = nautilus_list_base_get_view_info (base);
+        int zoom = nautilus_list_base_get_zoom_level (base);
+
+        if (direction > 0 && zoom < info.zoom_level_max)
+        {
+            gtk_widget_activate_action (GTK_WIDGET (view), "view.zoom-in", NULL);
+            return;
+        }
+        /* Smaller than standard stays with Ctrl+minus. */
+        if (direction < 0 && zoom > info.zoom_level_standard)
+        {
+            gtk_widget_activate_action (GTK_WIDGET (view), "view.zoom-out", NULL);
+            return;
+        }
+    }
+
+    mode = CLAMP ((int) mode + (direction > 0 ? 1 : -1),
+                  NAUTILUS_COLUMNS_MODE_LIST, NAUTILUS_COLUMNS_MODE_GRID);
+    if (mode != self->mode)
+    {
+        nautilus_columns_set_mode (self, mode);
+    }
+}
+
+/* Ctrl+wheel steps through the views; Ctrl+Shift+wheel is left to zoom. */
+static gboolean
+on_wheel (GtkEventControllerScroll *controller,
+          double                    dx,
+          double                    dy,
+          NautilusColumns          *self)
+{
+    GdkModifierType state = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (controller));
+    double threshold;
+    gint64 now;
+
+    if ((state & gtk_accelerator_get_default_mod_mask ()) != GDK_CONTROL_MASK || files_view (self) == NULL)
+    {
+        return GDK_EVENT_PROPAGATE;
+    }
+
+    /* A notch is 1; touchpads send pixels. */
+    threshold = gtk_event_controller_scroll_get_unit (controller) == GDK_SCROLL_UNIT_WHEEL ? 1.0 : 40.0;
+    now = g_get_monotonic_time ();
+    if (now < self->wheel_quiet_until)
+    {
+        return GDK_EVENT_STOP;
+    }
+
+    self->wheel_amount += dy;
+    if (ABS (self->wheel_amount) >= threshold)
+    {
+        /* Wheel up: the next view, as in Alt+1, 2, 3. */
+        nautilus_columns_step (self, self->wheel_amount < 0 ? 1 : -1);
+        self->wheel_amount = 0;
+        /* One step per notch, also for smoothed and fast wheels. */
+        self->wheel_quiet_until = now + 220 * G_TIME_SPAN_MILLISECOND;
+    }
+
+    return GDK_EVENT_STOP;
+}
+
+static void
+on_wheel_end (NautilusColumns *self)
+{
+    self->wheel_amount = 0;
 }
 
 /* ---------------------------------------------------------------- Keys */
@@ -549,8 +706,35 @@ nautilus_columns_init (NautilusColumns *self)
     g_signal_connect (controller, "key-pressed", G_CALLBACK (on_key_pressed), self);
     gtk_widget_add_controller (GTK_WIDGET (self), controller);
 
-    g_signal_connect_object (nautilus_flier_settings (), "changed::columns-view",
-                             G_CALLBACK (on_columns_setting), self, G_CONNECT_SWAPPED);
+    controller = gtk_event_controller_scroll_new (GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+    gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_CAPTURE);
+    g_signal_connect (controller, "scroll", G_CALLBACK (on_wheel), self);
+    g_signal_connect_swapped (controller, "scroll-end", G_CALLBACK (on_wheel_end), self);
+    gtk_widget_add_controller (GTK_WIDGET (self), controller);
+
+    self->enabled = g_settings_get_boolean (nautilus_flier_settings (), "columns-view");
+    self->mode = self->enabled ? NAUTILUS_COLUMNS_MODE_COLUMNS : NAUTILUS_COLUMNS_MODE_LIST;
+}
+
+static void
+nautilus_columns_get_property (GObject    *object,
+                               guint       prop_id,
+                               GValue     *value,
+                               GParamSpec *pspec)
+{
+    switch (prop_id)
+    {
+        case PROP_MODE:
+        {
+            g_value_set_uint (value, NAUTILUS_COLUMNS (object)->mode);
+        }
+        break;
+
+        default:
+        {
+            G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+        }
+    }
 }
 
 static void
@@ -576,6 +760,13 @@ static void
 nautilus_columns_class_init (NautilusColumnsClass *klass)
 {
     G_OBJECT_CLASS (klass)->dispose = nautilus_columns_dispose;
+    G_OBJECT_CLASS (klass)->get_property = nautilus_columns_get_property;
+
+    properties[PROP_MODE] = g_param_spec_uint ("mode", NULL, NULL,
+                                               NAUTILUS_COLUMNS_MODE_LIST, NAUTILUS_COLUMNS_MODE_GRID,
+                                               NAUTILUS_COLUMNS_MODE_LIST,
+                                               G_PARAM_READABLE | G_PARAM_STATIC_STRINGS | G_PARAM_EXPLICIT_NOTIFY);
+    g_object_class_install_properties (G_OBJECT_CLASS (klass), N_PROPS, properties);
     gtk_widget_class_set_layout_manager_type (GTK_WIDGET_CLASS (klass), GTK_TYPE_BOX_LAYOUT);
     gtk_widget_class_set_css_name (GTK_WIDGET_CLASS (klass), "nautilus-columns");
 }
@@ -591,7 +782,7 @@ nautilus_columns_new (NautilusWindowSlot *slot)
     g_signal_connect_object (slot, "notify::selection", G_CALLBACK (schedule_update), self,
                              G_CONNECT_SWAPPED);
     /* Switching between list and grid. */
-    g_signal_connect_object (slot, "notify::icon-name", G_CALLBACK (schedule_update), self,
+    g_signal_connect_object (slot, "notify::icon-name", G_CALLBACK (on_view_changed), self,
                              G_CONNECT_SWAPPED);
 
     return GTK_WIDGET (self);

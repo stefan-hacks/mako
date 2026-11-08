@@ -117,6 +117,8 @@ NautilusQueryEditor *nautilus_window_slot_get_query_editor (NautilusWindowSlot *
 
 /* Only used by slot-dnd */
 NautilusFilesView*  nautilus_window_slot_get_current_view  (NautilusWindowSlot *slot);
+/* The NautilusColumns around the view. */
+GtkWidget*          nautilus_window_slot_get_columns       (NautilusWindowSlot *slot);
 
 void nautilus_window_slot_back_or_forward                  (NautilusWindowSlot *slot,
                                                             gboolean            back,

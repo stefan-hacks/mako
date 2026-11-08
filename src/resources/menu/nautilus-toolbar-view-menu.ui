@@ -100,7 +100,8 @@
     </section>
     <section>
       <item>
-        <attribute name="action">win.columns-view</attribute>
+        <attribute name="action">win.view-mode</attribute>
+        <attribute name="target" type="u">2</attribute>
         <attribute name="label" translatable="yes">_Columns</attribute>
       </item>
       <item>

@@ -67,6 +67,7 @@
 #include "nautilus-signaller.h"
 #include "nautilus-toolbar.h"
 #include "nautilus-inspector.h"
+#include "nautilus-columns.h"
 #include "nautilus-labels.h"
 #include "nautilus-shortcuts.h"
 #include "nautilus-trash-monitor.h"
@@ -111,6 +112,7 @@ struct _NautilusWindow
     NautilusTileLayout *tile_layout;
     GtkPaned *inspector_paned;
     GtkWidget *inspector;
+    GtkWidget *mode_columns;    /* weak; the active slot's, for win.view-mode */
     gboolean inspector_placed;
     guint inspector_save_id;
     GMenuModel *tab_menu_model;
@@ -1478,23 +1480,46 @@ action_split_down (GSimpleAction *action,
 }
 
 static void
-action_focus_next_tile (GSimpleAction *action,
-                        GVariant      *state,
-                        gpointer       user_data)
+focus_tile_step (NautilusWindow *window,
+                 gboolean        forward)
 {
-    NautilusWindow *window = NAUTILUS_WINDOW (user_data);
     GList *tiles = nautilus_tile_layout_get_tiles (window->tile_layout);
     GList *link = g_list_find (tiles, nautilus_tile_for_widget (GTK_WIDGET (window->tab_view)));
-    GList *next = (link != NULL && link->next != NULL) ? link->next : tiles;
+    GList *to;
 
-    if (next != NULL && next != link)
+    if (forward)
     {
-        activate_tile (window, next->data);
+        to = (link != NULL && link->next != NULL) ? link->next : tiles;
+    }
+    else
+    {
+        to = (link != NULL && link->prev != NULL) ? link->prev : g_list_last (tiles);
+    }
+
+    if (to != NULL && to != link)
+    {
+        activate_tile (window, to->data);
         if (window->active_slot != NULL)
         {
             gtk_widget_grab_focus (GTK_WIDGET (window->active_slot));
         }
     }
+}
+
+static void
+action_focus_next_tile (GSimpleAction *action,
+                        GVariant      *state,
+                        gpointer       user_data)
+{
+    focus_tile_step (NAUTILUS_WINDOW (user_data), TRUE);
+}
+
+static void
+action_focus_previous_tile (GSimpleAction *action,
+                            GVariant      *state,
+                            gpointer       user_data)
+{
+    focus_tile_step (NAUTILUS_WINDOW (user_data), FALSE);
 }
 
 static GdkDragAction
@@ -1558,6 +1583,7 @@ const GActionEntry win_entries[] =
     { .name = "split-right", .activate = action_split_right },
     { .name = "split-down", .activate = action_split_down },
     { .name = "focus-next-tile", .activate = action_focus_next_tile },
+    { .name = "focus-previous-tile", .activate = action_focus_previous_tile },
     { .name = "toggle-sidebar", .activate = action_toggle_sidebar },
 };
 
@@ -1591,9 +1617,10 @@ nautilus_window_initialize_actions (NautilusWindow *window)
     nautilus_application_set_accelerator (app, "win.split-right", "F3");
     nautilus_application_set_accelerator (app, "win.split-down", "<shift>F3");
     nautilus_application_set_accelerator (app, "win.focus-next-tile", "F6");
+    nautilus_application_set_accelerator (app, "win.focus-previous-tile", "<shift>F6");
 
-    /* Alt+N for the first 9 tabs */
-    for (i = 0; i < 9; ++i)
+    /* Alt+N for tabs 4 to 9; Alt+1, 2, 3 switch views. */
+    for (i = 3; i < 9; ++i)
     {
         g_snprintf (detailed_action, sizeof (detailed_action), "win.go-to-tab(%i)", i);
         g_snprintf (accel, sizeof (accel), "<alt>%i", i + 1);
@@ -1688,6 +1715,8 @@ nautilus_window_constructed (GObject *self)
     nautilus_window_initialize_actions (window);
 }
 
+static void sync_view_mode (NautilusWindow *window);
+
 static void
 nautilus_window_dispose (GObject *object)
 {
@@ -1697,6 +1726,11 @@ nautilus_window_dispose (GObject *object)
     window = NAUTILUS_WINDOW (object);
 
     g_clear_handle_id (&window->inspector_save_id, g_source_remove);
+    if (window->mode_columns != NULL)
+    {
+        g_signal_handlers_disconnect_by_func (window->mode_columns, sync_view_mode, window);
+        g_clear_weak_pointer (&window->mode_columns);
+    }
     g_debug ("Destroying window");
 
     /* close all slots safely */
@@ -2138,15 +2172,79 @@ action_inspector_side_next (GSimpleAction *action,
 }
 
 static void
+sync_view_mode (NautilusWindow *window)
+{
+    GAction *action = g_action_map_lookup_action (G_ACTION_MAP (window), "view-mode");
+    guint mode = window->mode_columns != NULL ?
+                 nautilus_columns_get_mode (NAUTILUS_COLUMNS (window->mode_columns)) :
+                 NAUTILUS_COLUMNS_MODE_LIST;
+
+    g_simple_action_set_state (G_SIMPLE_ACTION (action), g_variant_new_uint32 (mode));
+}
+
+static void
+on_active_slot_for_view_mode (NautilusWindow *window)
+{
+    GtkWidget *columns = window->active_slot != NULL ?
+                         nautilus_window_slot_get_columns (window->active_slot) : NULL;
+
+    if (columns == window->mode_columns)
+    {
+        return;
+    }
+
+    if (window->mode_columns != NULL)
+    {
+        g_signal_handlers_disconnect_by_func (window->mode_columns, sync_view_mode, window);
+    }
+    g_set_weak_pointer (&window->mode_columns, columns);
+    if (columns != NULL)
+    {
+        g_signal_connect_object (columns, "notify::mode", G_CALLBACK (sync_view_mode), window,
+                                 G_CONNECT_SWAPPED);
+    }
+    sync_view_mode (window);
+}
+
+static void
+action_view_mode (GSimpleAction *action,
+                  GVariant      *value,
+                  gpointer       user_data)
+{
+    NautilusWindow *window = NAUTILUS_WINDOW (user_data);
+
+    if (window->mode_columns != NULL)
+    {
+        nautilus_columns_set_mode (NAUTILUS_COLUMNS (window->mode_columns),
+                                   CLAMP (g_variant_get_uint32 (value),
+                                          NAUTILUS_COLUMNS_MODE_LIST, NAUTILUS_COLUMNS_MODE_GRID));
+    }
+}
+
+static void
+action_view_step (GSimpleAction *action,
+                  GVariant      *value,
+                  gpointer       user_data)
+{
+    NautilusWindow *window = NAUTILUS_WINDOW (user_data);
+
+    if (window->mode_columns != NULL)
+    {
+        nautilus_columns_step (NAUTILUS_COLUMNS (window->mode_columns), g_variant_get_int32 (value));
+    }
+}
+
+static void
 setup_inspector (NautilusWindow *window)
 {
     GtkWidget *layout = GTK_WIDGET (window->tile_layout);
     GtkWidget *parent = gtk_widget_get_parent (layout);
     g_autoptr (GAction) visible = g_settings_create_action (nautilus_flier_settings (), "inspector-visible");
-    g_autoptr (GAction) columns = g_settings_create_action (nautilus_flier_settings (), "columns-view");
     static const GActionEntry entries[] =
     {
         { .name = "inspector-side-next", .activate = action_inspector_side_next },
+        { .name = "view-mode", .parameter_type = "u", .state = "uint32 1", .change_state = action_view_mode },
+        { .name = "view-step", .parameter_type = "i", .activate = action_view_step },
     };
 
     window->inspector = nautilus_inspector_new ();
@@ -2162,8 +2260,8 @@ setup_inspector (NautilusWindow *window)
     arrange_inspector (window);
 
     g_action_map_add_action (G_ACTION_MAP (window), visible);
-    g_action_map_add_action (G_ACTION_MAP (window), columns);
     g_action_map_add_action_entries (G_ACTION_MAP (window), entries, G_N_ELEMENTS (entries), window);
+    g_signal_connect (window, "notify::active-slot", G_CALLBACK (on_active_slot_for_view_mode), NULL);
 
     g_signal_connect_object (nautilus_flier_settings (), "changed::inspector-visible",
                              G_CALLBACK (arrange_inspector), window, G_CONNECT_SWAPPED);
