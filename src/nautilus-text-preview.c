@@ -28,11 +28,38 @@ G_DEFINE_TYPE (NautilusTextPreview, nautilus_text_preview, GTK_TYPE_WIDGET)
 gboolean
 nautilus_text_preview_handles (const char *mime_type)
 {
-    return mime_type != NULL &&
-           (g_content_type_is_a (mime_type, "text/plain") ||
-            g_content_type_is_a (mime_type, "application/json") ||
-            g_content_type_is_a (mime_type, "application/xml") ||
-            g_content_type_is_a (mime_type, "application/x-desktop"));
+    /* Text by another name: code, data and config formats that
+     * shared-mime-info doesn't file under text/plain. */
+    static const char *texts[] =
+    {
+        "application/json", "application/xml", "application/x-desktop", "application/javascript",
+        "application/x-yaml", "application/yaml", "application/toml", "application/x-toml",
+        "application/sql", "application/x-sql", "application/x-shellscript", "application/x-perl",
+        "application/x-python", "application/x-php", "application/x-ruby", "application/x-subrip",
+        "application/x-ipynb+json", "application/ld+json", "application/geo+json", "application/x-wine-extension-ini",
+        "application/x-ini-file", "application/x-trash", "application/x-log", "application/x-m4",
+        "application/x-cmakecache", "application/x-gettext-translation", "application/x-tex", "application/x-latex",
+        "application/xhtml+xml", "application/rss+xml", "application/atom+xml", "application/x-csh",
+        "application/x-awk", "application/x-zerosize",
+    };
+
+    if (mime_type == NULL)
+    {
+        return FALSE;
+    }
+    if (g_str_has_prefix (mime_type, "text/") || g_content_type_is_a (mime_type, "text/plain") ||
+        g_str_has_suffix (mime_type, "+json") || g_str_has_suffix (mime_type, "+xml"))
+    {
+        return TRUE;
+    }
+    for (guint i = 0; i < G_N_ELEMENTS (texts); i++)
+    {
+        if (g_content_type_is_a (mime_type, texts[i]))
+        {
+            return TRUE;
+        }
+    }
+    return FALSE;
 }
 
 static void

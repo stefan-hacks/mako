@@ -19,6 +19,7 @@
 #include "nautilus-file.h"
 #include "nautilus-image.h"
 #include "nautilus-labels.h"
+#include "nautilus-text-preview.h"
 
 #define TILE 200.0
 #define GAP 14.0
@@ -40,7 +41,15 @@ typedef struct
     gboolean full_failed;
     PangoLayout *name;
     gulong changed_id;
+    char *text;                /* the start of a text file, drawn as a page */
+    PangoLayout *text_layout;
+    GCancellable *text_loading;
+    GtkWidget *canvas;
 } Item;
+
+/* How much of a text file a page shows. */
+#define TEXT_PAGE_BYTES 3000
+#define TEXT_PAGE_LINES 48
 
 struct _NautilusQlCanvas
 {
@@ -87,6 +96,7 @@ static GParamSpec *properties[N_PROPS];
 static guint signals[N_SIGNALS];
 
 static void schedule_full_loads (NautilusQlCanvas *self);
+static void snapshot_text_page (NautilusQlCanvas *self, GtkSnapshot *snapshot, Item *item, const graphene_rect_t *pic);
 
 static void
 item_free (Item *item)
@@ -95,6 +105,10 @@ item_free (Item *item)
     g_clear_object (&item->loading);
     g_clear_object (&item->full);
     g_clear_object (&item->name);
+    g_cancellable_cancel (item->text_loading);
+    g_clear_object (&item->text_loading);
+    g_clear_object (&item->text_layout);
+    g_free (item->text);
     g_clear_signal_handler (&item->changed_id, item->file);
     if (item->image != NULL)
     {
@@ -723,6 +737,10 @@ nautilus_ql_canvas_snapshot (GtkWidget   *widget,
 
             gtk_snapshot_append_scaled_texture (snapshot, item->full, filter, &pic);
         }
+        else if (item->text != NULL)
+        {
+            snapshot_text_page (self, snapshot, item, &pic);
+        }
         else
         {
             gtk_widget_snapshot_child (widget, item->image, snapshot);
@@ -918,7 +936,97 @@ on_file_changed (NautilusQlCanvas *self)
     gtk_widget_queue_draw (GTK_WIDGET (self));
 }
 
+/* ------------------------------------------------------- Text pages */
+
+static gboolean
+text_enough (const char *chunk,
+             goffset     size,
+             gpointer    user_data)
+{
+    return size < TEXT_PAGE_BYTES;
+}
+
+static void
+on_text_loaded (GObject      *source,
+                GAsyncResult *result,
+                gpointer      user_data)
+{
+    g_autoptr (GError) error = NULL;
+    g_autofree char *contents = NULL;
+    gsize length = 0;
+
+    if (!g_file_load_partial_contents_finish (G_FILE (source), result, &contents, &length, NULL, &error) &&
+        g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    {
+        return;
+    }
+
+    Item *item = user_data;
+    g_autofree char *valid = g_utf8_make_valid (contents != NULL ? contents : "", MIN (length, TEXT_PAGE_BYTES));
+    char *p = valid;
+
+    g_clear_object (&item->text_loading);
+    if (contents == NULL || memchr (contents, '\0', MIN (length, TEXT_PAGE_BYTES)) != NULL)
+    {
+        return;   /* not text after all */
+    }
+    for (int lines = 0; *p != '\0' && lines < TEXT_PAGE_LINES; p++)
+    {
+        lines += *p == '\n';
+        if (*p == '\t')
+        {
+            *p = ' ';
+        }
+    }
+    *p = '\0';
+    item->text = g_steal_pointer (&valid);
+    gtk_widget_queue_draw (item->canvas);
+}
+
+/* A text file as a page: white, with its first lines. */
+static void
+snapshot_text_page (NautilusQlCanvas      *self,
+                    GtkSnapshot           *snapshot,
+                    Item                  *item,
+                    const graphene_rect_t *pic)
+{
+    double z = pic->size.height / PICTURE;
+    float w = pic->size.height * 0.77f;
+    graphene_rect_t page = GRAPHENE_RECT_INIT (pic->origin.x + (pic->size.width - w) / 2, pic->origin.y,
+                                               w, pic->size.height);
+    GskRoundedRect rounded;
+    GdkRGBA ink = { 0.18f, 0.18f, 0.2f, 1 };
+
+    if (item->text_layout == NULL)
+    {
+        PangoFontDescription *font = pango_font_description_from_string ("Monospace 5");
+
+        item->text_layout = gtk_widget_create_pango_layout (GTK_WIDGET (self), item->text);
+        pango_layout_set_font_description (item->text_layout, font);
+        pango_layout_set_width (item->text_layout, (int) ((PICTURE * 0.77 - 16) * PANGO_SCALE));
+        pango_layout_set_wrap (item->text_layout, PANGO_WRAP_WORD_CHAR);
+        pango_font_description_free (font);
+    }
+
+    gsk_rounded_rect_init_from_rect (&rounded, &page, 3 * z);
+    gtk_snapshot_append_outset_shadow (snapshot, &rounded, &(GdkRGBA){ 0, 0, 0, 0.25f }, 0, 1, 0, 4 * z);
+    gtk_snapshot_push_rounded_clip (snapshot, &rounded);
+    gtk_snapshot_append_color (snapshot, &(GdkRGBA){ 0.98f, 0.98f, 0.97f, 1 }, &page);
+    gtk_snapshot_save (snapshot);
+    gtk_snapshot_translate (snapshot, &GRAPHENE_POINT_INIT (page.origin.x + 8 * z, page.origin.y + 8 * z));
+    gtk_snapshot_scale (snapshot, z, z);
+    gtk_snapshot_append_layout (snapshot, item->text_layout, &ink);
+    gtk_snapshot_restore (snapshot);
+    gtk_snapshot_pop (snapshot);
+}
+
 /* -------------------------------------------------------------- API */
+
+static gboolean
+is_single_list (GList *files)
+{
+    return files != NULL && files->next == NULL;
+}
 
 void
 nautilus_ql_canvas_set_files (NautilusQlCanvas *self,
@@ -949,6 +1057,15 @@ nautilus_ql_canvas_set_files (NautilusQlCanvas *self,
             nautilus_image_set_source (NAUTILUS_IMAGE (item->image), location);
         }
         gtk_widget_set_parent (item->image, GTK_WIDGET (self));
+
+        item->canvas = GTK_WIDGET (self);
+        if (!is_single_list (files) && nautilus_file_is_regular_file (item->file) &&
+            nautilus_text_preview_handles (mime))
+        {
+            item->text_loading = g_cancellable_new ();
+            g_file_load_partial_contents_async (location, item->text_loading, text_enough,
+                                                on_text_loaded, item);
+        }
 
         item->changed_id = g_signal_connect_swapped (item->file, "changed",
                                                      G_CALLBACK (on_file_changed), self);
