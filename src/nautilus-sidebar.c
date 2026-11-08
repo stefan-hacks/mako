@@ -476,7 +476,8 @@ update_group_arrows (NautilusSidebar *sidebar)
             g_autoptr (GIcon) arrow = g_themed_icon_new (group_collapsed (section) ? "pan-end-symbolic"
                                                                                 : "pan-down-symbolic");
 
-            nautilus_sidebar_row_set_end_icon (NAUTILUS_SIDEBAR_ROW (child), arrow);
+            /* The property, which also shows the icon (the setter doesn't). */
+            g_object_set (child, "end-icon", arrow, NULL);
         }
     }
 }
@@ -698,7 +699,7 @@ list_box_header_func (GtkListBoxRow *row,
         before_section_type = NAUTILUS_SIDEBAR_SECTION_INVALID;
     }
 
-    if (before && before_section_type != row_section_type && !groups_on ())
+    if (before && before_section_type != row_section_type)
     {
         separator = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
         gtk_list_box_row_set_header (row, separator);
