@@ -1,4 +1,4 @@
-# Files Flier
+# Mako
 
 **A fast, hotkey-first fork of GNOME Files (Nautilus).**
 Split panes with their own tabs, Miller columns, a multi-file Quick Look,
@@ -9,9 +9,9 @@ It keeps the native GNOME look (GTK 4 and libadwaita) and stays close to
 upstream, so it is easy to follow new Nautilus releases. It is based on
 Nautilus **50.2.2**.
 
-![Files Flier with the inspector open](docs/media/hero.png)
+![Mako with the inspector open](docs/media/hero.png)
 
-> Files Flier is a personal fork. It is not made or supported by the GNOME
+> Mako is a personal fork. It is not made or supported by the GNOME
 > project. Please report problems here, not to GNOME.
 
 ---
@@ -147,7 +147,7 @@ and press a new one.
 
 ## Settings
 
-Most of what Files Flier adds can be switched in **Preferences →
+Most of what Mako adds can be switched in **Preferences →
 Organize**: ratings, tags, folder colors and their scheme, the built-in
 Quick Look, shortcut hints, keys in menus, sidebar groups and which
 sections and places the sidebar shows.
@@ -163,8 +163,8 @@ You need the build dependencies of Nautilus 50, with **GTK 4.22** and
 and `gettext`.
 
 ```sh
-git clone https://github.com/tommkotzu/nautilus-flier.git
-cd nautilus-flier
+git clone https://github.com/tommkotzu/mako.git
+cd mako
 meson setup _build --buildtype=debugoptimized --prefix="$HOME/.local/nautilus-ff"
 ninja -C _build
 meson install -C _build
@@ -175,7 +175,7 @@ regular Files app without replacing it. To run it from that prefix:
 
 ```sh
 #!/bin/sh
-# ~/.local/bin/nautilus-flier
+# ~/.local/bin/mako
 P="$HOME/.local/nautilus-ff"
 export GSETTINGS_SCHEMA_DIR="$P/share/glib-2.0/schemas"
 export XDG_DATA_DIRS="$P/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
@@ -193,7 +193,7 @@ Undo it with `xdg-mime default org.gnome.Nautilus.desktop inode/directory`.
 
 ## Status
 
-Files Flier is used daily, but it is young. All changes are on the
+Mako is used daily, but it is young. All changes are on the
 `ff/split-panes` branch, one commit per feature, on top of Nautilus
 50.2.2. New code goes into its own files where possible (for example
 `nautilus-shortcuts.c`, `nautilus-quick-look.c`, `nautilus-columns.c`,
