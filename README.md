@@ -63,7 +63,7 @@ file's details. One click reveals an item, a double click goes into it.
 **Grouping:** `Ctrl+G` steps through grouping by date, first letter,
 rating and kind. **Flat view:** `Alt+R` lists every file in all subfolders.
 
-![List grouped by rating](docs/media/list.png)
+![List grouped by first letter](docs/media/list.png)
 
 ## Tiles and tabs
 
@@ -106,6 +106,8 @@ headers are stops too, so this works even when every group is folded.
 Ratings and tags are written to the files themselves (extended attributes),
 so they move with the files and other apps such as Dolphin can read them.
 Tag names and colors are kept in `~/.config/nautilus/tags.json`.
+
+![Rainbow folder colors in five schemes](docs/media/colors.gif)
 
 ## Keyboard: one hand on the keys
 
