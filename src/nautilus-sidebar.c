@@ -388,20 +388,134 @@ group_icon (NautilusSidebarSectionType section)
     }
 }
 
-/* File Flier's order: Bookmarks, Places, Storage, Recent, Tags. */
+static const NautilusSidebarSectionType all_groups[] =
+{
+    NAUTILUS_SIDEBAR_SECTION_BOOKMARKS, NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
+    NAUTILUS_SIDEBAR_SECTION_CLOUD, NAUTILUS_SIDEBAR_SECTION_MOUNTS,
+    NAUTILUS_SIDEBAR_SECTION_RECENT, NAUTILUS_SIDEBAR_SECTION_TAGS,
+};
+
+/* The groups in the user's order (sidebar-group-order); ones it doesn't
+ * name go after, in File Flier's order. Returns a new array of ids. */
+static GPtrArray *
+group_order (void)
+{
+    g_auto (GStrv) order = g_settings_get_strv (nautilus_flier_settings (), "sidebar-group-order");
+    GPtrArray *ids = g_ptr_array_new ();
+
+    for (guint i = 0; order[i] != NULL; i++)
+    {
+        for (guint g = 0; g < G_N_ELEMENTS (all_groups); g++)
+        {
+            const char *id = group_id (all_groups[g]);
+
+            if (g_str_equal (order[i], id) && !g_ptr_array_find_with_equal_func (ids, id, g_str_equal, NULL))
+            {
+                g_ptr_array_add (ids, (gpointer) id);
+            }
+        }
+    }
+    for (guint g = 0; g < G_N_ELEMENTS (all_groups); g++)
+    {
+        const char *id = group_id (all_groups[g]);
+
+        if (!g_ptr_array_find_with_equal_func (ids, id, g_str_equal, NULL))
+        {
+            g_ptr_array_add (ids, (gpointer) id);
+        }
+    }
+
+    return ids;
+}
+
 static int
 group_rank (NautilusSidebarSectionType section)
 {
-    switch (section)
+    g_autoptr (GPtrArray) ids = group_order ();
+    guint index;
+
+    return g_ptr_array_find_with_equal_func (ids, group_id (section), g_str_equal, &index) ? (int) index : 99;
+}
+
+/* Puts group @moved before (or, @after, behind) group @target. */
+static void
+move_group (const char *moved,
+            const char *target,
+            gboolean    after)
+{
+    g_autoptr (GPtrArray) ids = group_order ();
+    guint from, to;
+
+    if (g_strcmp0 (moved, target) == 0 ||
+        !g_ptr_array_find_with_equal_func (ids, moved, g_str_equal, &from) ||
+        !g_ptr_array_find_with_equal_func (ids, target, g_str_equal, NULL))
     {
-        case NAUTILUS_SIDEBAR_SECTION_BOOKMARKS: return 0;
-        case NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS: return 1;
-        case NAUTILUS_SIDEBAR_SECTION_CLOUD: return 2;
-        case NAUTILUS_SIDEBAR_SECTION_MOUNTS: return 3;
-        case NAUTILUS_SIDEBAR_SECTION_RECENT: return 4;
-        case NAUTILUS_SIDEBAR_SECTION_TAGS: return 5;
-        default: return 6;
+        return;
     }
+    g_ptr_array_remove_index (ids, from);
+    g_ptr_array_find_with_equal_func (ids, target, g_str_equal, &to);
+    g_ptr_array_insert (ids, after ? (int) to + 1 : (int) to, (gpointer) moved);
+    g_ptr_array_add (ids, NULL);
+    g_settings_set_strv (nautilus_flier_settings (), "sidebar-group-order", (const char * const *) ids->pdata);
+}
+
+static int compare_group_ids (const char *a, const char *b, gpointer user_data);
+
+/* Moves group @id one place up or down among the groups that are shown. */
+static void
+step_group (NautilusSidebar *sidebar,
+            const char      *id,
+            int              step)
+{
+    g_autoptr (GPtrArray) shown = g_ptr_array_new_with_free_func (g_free);
+
+    for (GtkWidget *child = gtk_widget_get_first_child (sidebar->list_box); child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        NautilusSidebarRowType place_type;
+        NautilusSidebarSectionType section;
+
+        if (NAUTILUS_IS_SIDEBAR_ROW (child))
+        {
+            g_object_get (child, "place-type", &place_type, "section-type", &section, NULL);
+            if (place_type == NAUTILUS_SIDEBAR_ROW_GROUP_HEADER)
+            {
+                g_ptr_array_add (shown, g_strdup (group_id (section)));
+            }
+        }
+    }
+
+    /* The children are in insertion order: sort them by rank. */
+    g_ptr_array_sort_values_with_data (shown, (GCompareDataFunc) compare_group_ids, NULL);
+
+    guint at;
+
+    if (g_ptr_array_find_with_equal_func (shown, id, g_str_equal, &at) &&
+        (int) at + step >= 0 && at + step < shown->len)
+    {
+        move_group (id, g_ptr_array_index (shown, at + step), step > 0);
+    }
+}
+
+static NautilusSidebarSectionType
+group_from_id (const char *id)
+{
+    for (guint g = 0; g < G_N_ELEMENTS (all_groups); g++)
+    {
+        if (g_strcmp0 (group_id (all_groups[g]), id) == 0)
+        {
+            return all_groups[g];
+        }
+    }
+    return NAUTILUS_SIDEBAR_SECTION_INVALID;
+}
+
+static int
+compare_group_ids (const char *a,
+                   const char *b,
+                   gpointer    user_data)
+{
+    return group_rank (group_from_id (a)) - group_rank (group_from_id (b));
 }
 
 static gboolean
@@ -517,6 +631,119 @@ static void
 on_tags_changed (NautilusSidebar *sidebar)
 {
     update_places (sidebar);
+}
+
+/* Dragging a group's header onto another moves the group there. */
+#define GROUP_DRAG_PREFIX "nautilus-sidebar-group:"
+
+static GdkContentProvider *
+on_group_drag_prepare (GtkDragSource *source,
+                       double         x,
+                       double         y,
+                       GtkWidget     *header)
+{
+    NautilusSidebarSectionType section;
+    g_autofree char *text = NULL;
+
+    g_object_get (header, "section-type", &section, NULL);
+    text = g_strconcat (GROUP_DRAG_PREFIX, group_id (section), NULL);
+    return gdk_content_provider_new_typed (G_TYPE_STRING, text);
+}
+
+static void
+on_group_drag_begin (GtkDragSource *source,
+                     GdkDrag       *drag,
+                     GtkWidget     *header)
+{
+    g_autoptr (GdkPaintable) paintable = gtk_widget_paintable_new (header);
+
+    gtk_drag_source_set_icon (source, paintable, 12, 12);
+}
+
+static gboolean
+on_group_drop (GtkDropTarget *target,
+               const GValue  *value,
+               double         x,
+               double         y,
+               GtkWidget     *header)
+{
+    const char *text = G_VALUE_HOLDS_STRING (value) ? g_value_get_string (value) : NULL;
+    NautilusSidebarSectionType section;
+
+    if (text == NULL || !g_str_has_prefix (text, GROUP_DRAG_PREFIX))
+    {
+        return FALSE;
+    }
+    g_object_get (header, "section-type", &section, NULL);
+
+    const char *moved = text + strlen (GROUP_DRAG_PREFIX);
+    /* Down the list: behind the target; up: before it. */
+    gboolean after = group_rank (group_from_id (moved)) < group_rank (section);
+
+    move_group (moved, group_id (section), after);
+    return TRUE;
+}
+
+static void
+on_group_move (GSimpleAction *action,
+               GVariant      *parameter,
+               gpointer       user_data)
+{
+    GtkWidget *header = user_data;
+    NautilusSidebarSectionType section;
+    g_autoptr (NautilusSidebar) sidebar = NULL;
+
+    g_object_get (header, "section-type", &section, "sidebar", &sidebar, NULL);
+    step_group (sidebar, group_id (section), g_str_equal (g_action_get_name (G_ACTION (action)), "down") ? 1 : -1);
+}
+
+static gboolean
+unparent_later (gpointer popover)
+{
+    gtk_widget_unparent (popover);
+    g_object_unref (popover);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+unparent_popover_later (GtkWidget *popover)
+{
+    /* Later: the item's action runs after the menu closes. */
+    g_idle_add (unparent_later, g_object_ref (popover));
+}
+
+static void
+show_group_menu (GtkWidget *header,
+                 double     x,
+                 double     y)
+{
+    static const GActionEntry entries[] =
+    {
+        { .name = "up", .activate = on_group_move },
+        { .name = "down", .activate = on_group_move },
+    };
+    g_autoptr (GSimpleActionGroup) group = g_simple_action_group_new ();
+    g_autoptr (GMenu) menu = g_menu_new ();
+    GtkWidget *popover;
+
+    g_action_map_add_action_entries (G_ACTION_MAP (group), entries, G_N_ELEMENTS (entries), header);
+    gtk_widget_insert_action_group (header, "group", G_ACTION_GROUP (group));
+    g_menu_append (menu, _("Move _Up"), "group.up");
+    g_menu_append (menu, _("Move _Down"), "group.down");
+
+    popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
+    gtk_widget_set_parent (popover, header);
+    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+    gtk_popover_set_pointing_to (GTK_POPOVER (popover), &(GdkRectangle) { (int) x, (int) y, 1, 1 });
+    g_signal_connect (popover, "closed", G_CALLBACK (unparent_popover_later), NULL);
+    gtk_popover_popup (GTK_POPOVER (popover));
+}
+
+static void
+on_order_changed (NautilusSidebar *sidebar)
+{
+    gtk_list_box_invalidate_sort (GTK_LIST_BOX (sidebar->list_box));
+    gtk_list_box_invalidate_headers (GTK_LIST_BOX (sidebar->list_box));
 }
 
 static void
@@ -672,6 +899,16 @@ add_flier_rows (NautilusSidebar *sidebar)
                                            NULL, 0, NULL);
 
             gtk_widget_add_css_class (header, "sidebar-group-header");
+
+            GtkDragSource *drag = gtk_drag_source_new ();
+            GtkDropTarget *drop = gtk_drop_target_new (G_TYPE_STRING, GDK_ACTION_MOVE);
+
+            gtk_drag_source_set_actions (drag, GDK_ACTION_MOVE);
+            g_signal_connect (drag, "prepare", G_CALLBACK (on_group_drag_prepare), header);
+            g_signal_connect (drag, "drag-begin", G_CALLBACK (on_group_drag_begin), header);
+            gtk_widget_add_controller (header, GTK_EVENT_CONTROLLER (drag));
+            g_signal_connect (drop, "drop", G_CALLBACK (on_group_drop), header);
+            gtk_widget_add_controller (header, GTK_EVENT_CONTROLLER (drop));
             gtk_list_box_row_set_selectable (GTK_LIST_BOX_ROW (header), FALSE);
         }
     }
@@ -3675,7 +3912,11 @@ on_row_released (GtkGestureClick    *gesture,
             NautilusSidebarRowType place_type;
 
             g_object_get (row, "place-type", &place_type, NULL);
-            if (place_type != NAUTILUS_SIDEBAR_ROW_GROUP_HEADER && place_type != NAUTILUS_SIDEBAR_ROW_TAG)
+            if (place_type == NAUTILUS_SIDEBAR_ROW_GROUP_HEADER)
+            {
+                show_group_menu (GTK_WIDGET (row), x, y);
+            }
+            else if (place_type != NAUTILUS_SIDEBAR_ROW_TAG)
             {
                 show_row_popover (NAUTILUS_SIDEBAR_ROW (row), x, y);
             }
@@ -4049,6 +4290,8 @@ nautilus_sidebar_init (NautilusSidebar *sidebar)
                                   list_box_filter_func, sidebar, NULL);
     g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-collapsed",
                              G_CALLBACK (on_collapsed_changed), sidebar, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-group-order",
+                             G_CALLBACK (on_order_changed), sidebar, G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-groups",
                              G_CALLBACK (update_places), sidebar, G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_labels_get (), "tags-changed",

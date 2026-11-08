@@ -83,6 +83,11 @@
       <summary>Sidebar groups</summary>
       <description>Show the sidebar as groups that fold away, like File Flier's: Bookmarks, Places, Storage, Recent and Tags.</description>
     </key>
+    <key type="as" name="sidebar-group-order">
+      <default>['bookmarks', 'places', 'cloud', 'devices', 'recent', 'tags']</default>
+      <summary>Order of the sidebar groups</summary>
+      <description>Drag a group's header onto another, or use Move Up and Move Down in its menu.</description>
+    </key>
     <key type="as" name="sidebar-collapsed">
       <default>['recent']</default>
       <summary>Folded sidebar groups</summary>
