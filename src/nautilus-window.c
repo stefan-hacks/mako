@@ -1699,6 +1699,27 @@ capture_to_png (NautilusWindow *window,
     }
     texture = gsk_renderer_render_texture (gtk_native_get_renderer (GTK_NATIVE (window)), node,
                                            &GRAPHENE_RECT_INIT (0, 0, width * scale, height * scale));
+    if (g_str_has_suffix (path, ".ppm"))
+    {
+        /* Recording frames: raw RGB, much faster to write than PNG. */
+        g_autoptr (GdkTextureDownloader) downloader = gdk_texture_downloader_new (texture);
+        gsize stride;
+        g_autoptr (GBytes) bytes = NULL;
+        g_autofree char *header = NULL;
+        g_autoptr (GByteArray) data = g_byte_array_new ();
+        int w = gdk_texture_get_width (texture), h = gdk_texture_get_height (texture);
+
+        gdk_texture_downloader_set_format (downloader, GDK_MEMORY_R8G8B8);
+        bytes = gdk_texture_downloader_download_bytes (downloader, &stride);
+        header = g_strdup_printf ("P6\n%d %d\n255\n", w, h);
+        g_byte_array_append (data, (guint8 *) header, strlen (header));
+        for (int y = 0; y < h; y++)
+        {
+            g_byte_array_append (data, (const guint8 *) g_bytes_get_data (bytes, NULL) + y * stride, w * 3);
+        }
+        g_file_set_contents (path, (const char *) data->data, data->len, NULL);
+        return;
+    }
     gdk_texture_save_to_png (texture, path);
 }
 
@@ -1798,6 +1819,7 @@ typedef struct
     guint poll_id;
     gulong paint_id;
     GdkFrameClock *clock;
+    gboolean wait_load, seen_load;
 } BenchRun;
 
 static void
@@ -1838,8 +1860,14 @@ bench_poll (gpointer data)
     NautilusWindowSlot *slot = run->window->active_slot;
     NautilusFilesView *view = slot != NULL ? nautilus_window_slot_get_current_view (slot) : NULL;
 
-    if (slot == NULL || nautilus_window_slot_get_loading (slot) ||
-        view == NULL || nautilus_files_view_get_loading (view))
+    gboolean loading = slot == NULL || nautilus_window_slot_get_loading (slot) ||
+                       view == NULL || nautilus_files_view_get_loading (view);
+
+    /* A load starts a moment after the command; don't stop before it.
+     * Give up waiting for one after a second. */
+    run->seen_load |= loading;
+    if (loading || (run->wait_load && !run->seen_load &&
+                    g_get_monotonic_time () - run->start < G_USEC_PER_SEC))
     {
         return G_SOURCE_CONTINUE;
     }
@@ -1858,8 +1886,9 @@ static gboolean
 capture_tick (gpointer data)
 {
     /* Named by milliseconds since "rec:", so slow frames keep real time. */
-    g_autofree char *path = g_strdup_printf ("%s/%08" G_GINT64_FORMAT ".png", capture_dir,
-                                             (g_get_monotonic_time () - capture_start) / 1000);
+    g_autofree char *path = g_strdup_printf ("%s/%08" G_GINT64_FORMAT ".%s", capture_dir,
+                                             (g_get_monotonic_time () - capture_start) / 1000,
+                                             g_getenv ("FLIER_CAPTURE_RAW") != NULL ? "ppm" : "png");
 
     capture_frame++;
 
@@ -1896,6 +1925,7 @@ action_flier_capture (GSimpleAction *action,
 
         run->window = window;
         run->name = g_strndup (command + 6, rest - 1 - (command + 6));
+        run->wait_load = g_str_has_prefix (rest, "go:") || strstr (rest, "flat-view") != NULL;
         run->start = g_get_monotonic_time ();
         action_flier_capture (action, g_variant_new_string (rest), user_data);
         run->poll_id = g_timeout_add (1, bench_poll, run);
