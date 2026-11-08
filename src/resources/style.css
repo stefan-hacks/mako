@@ -419,3 +419,6 @@ nautilus-tile > tabbar .box:backdrop {
   background-color: var(--view-bg-color);
 }
 nautilus-ql-canvas { background-color: var(--view-bg-color); }
+
+/* Group headings in the list view */
+columnview header .group-header { padding: 12px 12px 4px 12px; }

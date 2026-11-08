@@ -93,6 +93,12 @@ static const Command commands[] =
     { SECTION_VIEW, N_("Zoom Out"), "view.zoom-out", "<ctrl>minus", "<ctrl><alt>s" },
     { SECTION_VIEW, N_("Reset Zoom"), "view.zoom-standard", "<ctrl>0", NULL },
     { SECTION_VIEW, N_("Show Hidden Files"), "view.show-hidden-files", "<ctrl>h", "<alt>v" },
+    { SECTION_VIEW, N_("Next Grouping"), "view.group-by-next", NULL, "<ctrl>g" },
+    { SECTION_VIEW, N_("Group by Date"), "view.group-by('date')", NULL, NULL },
+    { SECTION_VIEW, N_("Group by First Letter"), "view.group-by('name')", NULL, NULL },
+    { SECTION_VIEW, N_("Group by Rating"), "view.group-by('rating')", NULL, NULL },
+    { SECTION_VIEW, N_("Group by Kind"), "view.group-by('kind')", NULL, NULL },
+    { SECTION_VIEW, N_("No Groups"), "view.group-by('none')", NULL, NULL },
 
     { SECTION_ORGANIZE, N_("Rate 1 Star"), "view.rate(uint32 1)", "<ctrl><alt>1", NULL },
     { SECTION_ORGANIZE, N_("Rate 2 Stars"), "view.rate(uint32 2)", "<ctrl><alt>2", NULL },

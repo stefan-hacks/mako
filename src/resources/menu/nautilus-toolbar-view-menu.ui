@@ -65,5 +65,37 @@
       <attribute name="hidden-when">action-disabled</attribute>
       <attribute name="nautilus-menu-item">relevance</attribute>
     </item>
+    <section>
+      <submenu>
+        <attribute name="label" translatable="yes">_Group By</attribute>
+        <section>
+          <item>
+            <attribute name="action">view.group-by</attribute>
+            <attribute name="target">none</attribute>
+            <attribute name="label" translatable="yes">_None</attribute>
+          </item>
+          <item>
+            <attribute name="action">view.group-by</attribute>
+            <attribute name="target">date</attribute>
+            <attribute name="label" translatable="yes">_Date Modified</attribute>
+          </item>
+          <item>
+            <attribute name="action">view.group-by</attribute>
+            <attribute name="target">name</attribute>
+            <attribute name="label" translatable="yes">_First Letter</attribute>
+          </item>
+          <item>
+            <attribute name="action">view.group-by</attribute>
+            <attribute name="target">rating</attribute>
+            <attribute name="label" translatable="yes">_Rating</attribute>
+          </item>
+          <item>
+            <attribute name="action">view.group-by</attribute>
+            <attribute name="target">kind</attribute>
+            <attribute name="label" translatable="yes">_Kind</attribute>
+          </item>
+        </section>
+      </submenu>
+    </section>
   </menu>
 </interface>

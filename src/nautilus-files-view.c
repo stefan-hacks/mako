@@ -81,6 +81,7 @@
 #include "nautilus-view-info.h"
 #include "nautilus-view-item.h"
 #include "nautilus-view-model.h"
+#include "nautilus-grouping.h"
 #include "nautilus-window-slot.h"
 
 /* Minimum starting update interval */
@@ -149,6 +150,8 @@ struct _NautilusFilesView
     /* Main components */
     GtkWidget *overlay;
     NautilusListBase *list_base;
+
+    gboolean loading_group_by;
 
     NautilusWindowSlot *slot;
     NautilusDirectory *directory;
@@ -631,10 +634,13 @@ focus_is_on_popup (GtkRoot *window)
     return FALSE;
 }
 
+static void update_group_by_from_metadata (NautilusFilesView *self);
+
 static void
 files_view_begin_loading (NautilusFilesView *self)
 {
     update_sort_order_from_metadata_and_preferences (self);
+    update_group_by_from_metadata (self);
 
     /* We could have changed to the trash directory or to searching, and then
      * we need to update the menus */
@@ -2549,6 +2555,87 @@ action_toggle_marks_on_tiles (GSimpleAction *action,
 
     g_settings_set_boolean (settings, "marks-on-tiles",
                             !g_settings_get_boolean (settings, "marks-on-tiles"));
+}
+
+/* ---------------------------------------------------------- Grouping */
+
+static NautilusGroupBy
+get_group_by (NautilusFilesView *self)
+{
+    g_autoptr (GVariant) state = g_action_group_get_action_state (self->view_action_group, "group-by");
+
+    return state != NULL ? nautilus_group_by_from_string (g_variant_get_string (state, NULL))
+                         : NAUTILUS_GROUP_BY_NONE;
+}
+
+/* Groups, with headings, show in the list view; the grid has no headings
+ * (GtkGridView has no sections), so it isn't grouped. */
+static void
+apply_group_by (NautilusFilesView *self)
+{
+    gboolean list = NAUTILUS_IS_LIST_VIEW (self->list_base);
+    NautilusGroupBy mode = list ? get_group_by (self) : NAUTILUS_GROUP_BY_NONE;
+    g_autoptr (GtkSorter) sorter = nautilus_group_sorter_new (mode);
+
+    if (self->model == NULL)
+    {
+        return;
+    }
+
+    nautilus_view_model_set_section_sorter (self->model, sorter);
+    if (list)
+    {
+        nautilus_list_view_set_group_by (NAUTILUS_LIST_VIEW (self->list_base), mode);
+    }
+}
+
+static void
+action_group_by (GSimpleAction *action,
+                 GVariant      *value,
+                 gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    g_autoptr (GVariant) old = g_action_get_state (G_ACTION (action));
+
+    if (g_variant_equal (value, old))
+    {
+        return;
+    }
+
+    g_simple_action_set_state (action, value);
+
+    /* Remembered per folder. */
+    if (!self->loading_group_by && self->directory_as_file != NULL)
+    {
+        nautilus_file_set_metadata (self->directory_as_file, NAUTILUS_METADATA_KEY_GROUP_BY,
+                                    "none", g_variant_get_string (value, NULL));
+    }
+
+    apply_group_by (self);
+}
+
+static void
+action_group_by_next (GSimpleAction *action,
+                      GVariant      *parameter,
+                      gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    NautilusGroupBy next = (get_group_by (self) + 1) % NAUTILUS_GROUP_BY_N_MODES;
+
+    g_action_group_change_action_state (self->view_action_group, "group-by",
+                                        g_variant_new_string (nautilus_group_by_to_string (next)));
+}
+
+static void
+update_group_by_from_metadata (NautilusFilesView *self)
+{
+    const char *mode = nautilus_file_get_metadata (self->directory_as_file,
+                                                   NAUTILUS_METADATA_KEY_GROUP_BY, "none");
+
+    self->loading_group_by = TRUE;
+    g_action_group_change_action_state (self->view_action_group, "group-by",
+                                        g_variant_new_string (mode != NULL ? mode : "none"));
+    self->loading_group_by = FALSE;
 }
 
 static void
@@ -6941,6 +7028,8 @@ const GActionEntry view_entries[] =
     { .name = "edit-tags", .activate = action_edit_tags },
     { .name = "folder-color", .parameter_type = "i", .activate = action_folder_color },
     { .name = "toggle-marks-on-tiles", .activate = action_toggle_marks_on_tiles },
+    { .name = "group-by", .parameter_type = "s", .state = "'none'", .change_state = action_group_by },
+    { .name = "group-by-next", .activate = action_group_by_next },
     { .name = "current-directory-properties", .activate = action_current_dir_properties},
     { .name = "run-in-terminal", .activate = action_run_in_terminal },
     { .name = "set-as-wallpaper", .activate = action_set_as_wallpaper },
@@ -7844,6 +7933,14 @@ nautilus_files_view_update_actions_state (NautilusFilesView *self)
         g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
                                      all_native && any_folder &&
                                      g_settings_get_boolean (flier, "folder-colors"));
+
+        /* Groups have headings only in the list. */
+        gboolean list = NAUTILUS_IS_LIST_VIEW (self->list_base);
+
+        action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group), "group-by");
+        g_simple_action_set_enabled (G_SIMPLE_ACTION (action), list);
+        action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group), "group-by-next");
+        g_simple_action_set_enabled (G_SIMPLE_ACTION (action), list);
     }
 }
 
@@ -9878,6 +9975,7 @@ nautilus_files_view_change (NautilusFilesView *self,
 
     /* Create a new one */
     create_inner_view (self, id);
+    apply_group_by (self);
 
     /* Prepare directory settings before connecting the model. */
     nautilus_list_base_setup_directory (self->list_base, self->directory);

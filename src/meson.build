@@ -236,6 +236,8 @@ libnautilus_sources = [
   'nautilus-sidebar-row.h',
   'nautilus-signaller.c',
   'nautilus-signaller.h',
+  'nautilus-grouping.c',
+  'nautilus-grouping.h',
   'nautilus-marks-cell.c',
   'nautilus-ql-canvas.c',
   'nautilus-ql-canvas.h',

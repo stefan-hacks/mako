@@ -25,6 +25,7 @@
 #include "nautilus-name-cell.h"
 #include "nautilus-scheme.h"
 #include "nautilus-search-directory.h"
+#include "nautilus-grouping.h"
 #include "nautilus-marks-cell.h"
 #include "nautilus-star-cell.h"
 #include "nautilus-tag-manager.h"
@@ -37,6 +38,8 @@
 struct _NautilusListView
 {
     NautilusListBase parent_instance;
+
+    NautilusGroupBy group_by;
 
     GtkColumnView *view_ui;
 
@@ -410,6 +413,74 @@ create_column_editor (NautilusListView *view)
                               view);
 
     return column_chooser;
+}
+
+/* ------------------------------------------------------ Group headers */
+
+static void
+setup_group_header (GtkSignalListItemFactory *factory,
+                    GtkListHeader            *header,
+                    gpointer                  user_data)
+{
+    GtkWidget *label = gtk_label_new (NULL);
+
+    gtk_label_set_xalign (GTK_LABEL (label), 0);
+    gtk_widget_add_css_class (label, "heading");
+    gtk_widget_add_css_class (label, "group-header");
+    gtk_list_header_set_child (header, label);
+}
+
+static void
+bind_group_header (GtkSignalListItemFactory *factory,
+                   GtkListHeader            *header,
+                   gpointer                  user_data)
+{
+    NautilusListView *self = user_data;
+    GtkTreeListRow *row = gtk_list_header_get_item (header);
+    g_autoptr (NautilusViewItem) item = NULL;
+    g_autofree char *label = NULL;
+    g_autofree char *text = NULL;
+    guint n = gtk_list_header_get_n_items (header);
+
+    /* The section's first row; its folder, if it's inside an expanded one. */
+    while (row != NULL && gtk_tree_list_row_get_parent (row) != NULL)
+    {
+        g_autoptr (GtkTreeListRow) parent = gtk_tree_list_row_get_parent (row);
+
+        row = parent;
+    }
+    item = row != NULL ? gtk_tree_list_row_get_item (row) : NULL;
+    if (item == NULL)
+    {
+        return;
+    }
+
+    label = nautilus_group_get_label (self->group_by, nautilus_view_item_get_file (item));
+    text = g_strdup_printf ("%s  <span weight='normal' alpha='60%%'>%u</span>", label, n);
+    gtk_label_set_markup (GTK_LABEL (gtk_list_header_get_child (header)), text);
+}
+
+void
+nautilus_list_view_set_group_by (NautilusListView *self,
+                                 NautilusGroupBy   group_by)
+{
+    g_autoptr (GtkListItemFactory) factory = NULL;
+
+    if (self->group_by == group_by)
+    {
+        return;
+    }
+
+    self->group_by = group_by;
+
+    if (group_by != NAUTILUS_GROUP_BY_NONE)
+    {
+        factory = gtk_signal_list_item_factory_new ();
+        g_signal_connect (factory, "setup", G_CALLBACK (setup_group_header), self);
+        g_signal_connect (factory, "bind", G_CALLBACK (bind_group_header), self);
+    }
+
+    gtk_column_view_set_header_factory (self->view_ui, factory);
 }
 
 void

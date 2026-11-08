@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "nautilus-grouping.h"
 #include "nautilus-list-base.h"
 
 G_BEGIN_DECLS
@@ -19,5 +20,9 @@ G_DECLARE_FINAL_TYPE (NautilusListView, nautilus_list_view, NAUTILUS, LIST_VIEW,
 NautilusListView *nautilus_list_view_new (void);
 
 void nautilus_list_view_present_column_editor (NautilusListView *self);
+
+/* Headings over the groups, when the view's items are grouped. */
+void nautilus_list_view_set_group_by (NautilusListView *self,
+                                      NautilusGroupBy   group_by);
 
 G_END_DECLS
