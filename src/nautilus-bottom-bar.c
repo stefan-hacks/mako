@@ -289,8 +289,11 @@ sync_search (NautilusBottomBar *self)
     editor = GTK_WIDGET (nautilus_window_slot_get_query_editor (self->slot));
     parent = gtk_widget_get_parent (editor);
 
-    /* The header bar holds it while the bar is off. */
-    if (searching && parent != self->search_box)
+    /* Kept here, hidden while not searching, as long as the bar is on (the
+     * header bar holds it while the bar is off). A query editor without a
+     * parent gets realized by the search starting, and GTK then aborts
+     * when it's added somewhere. */
+    if (parent != self->search_box)
     {
         if (parent != NULL)
         {
@@ -299,7 +302,10 @@ sync_search (NautilusBottomBar *self)
         gtk_widget_set_hexpand (editor, TRUE);
         gtk_box_append (GTK_BOX (self->search_box), editor);
         /* Moving it lost the focus the slot gave it. */
-        gtk_widget_grab_focus (editor);
+        if (searching)
+        {
+            gtk_widget_grab_focus (editor);
+        }
     }
 
     gtk_stack_set_visible_child (GTK_STACK (self->stack), searching ? self->search_box : self->filter_entry);
@@ -523,6 +529,7 @@ nautilus_bottom_bar_new (NautilusWindowSlot *slot)
     sync_mode (self);
     sync_flat (self);
     sync_sort_menu (self);
+    sync_search (self);
 
     return GTK_WIDGET (self);
 }
