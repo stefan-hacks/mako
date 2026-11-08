@@ -78,6 +78,11 @@
       <summary>Bottom bar</summary>
       <description>Show a bar under each tab with the views, a filter, search and the view menu, instead of search and the view menu in the header bar.</description>
     </key>
+    <key type="b" name="shortcut-hints">
+      <default>true</default>
+      <summary>Shortcut hints</summary>
+      <description>Briefly show what a keyboard shortcut did, at the bottom of the window.</description>
+    </key>
     <key name="inspector-side" enum="org.gnome.nautilus.flier.InspectorSide">
       <default>'right'</default>
       <summary>Inspector side</summary>

@@ -450,3 +450,13 @@ nautilus-quick-look, .quick-look { background-color: alpha(black, 0.32); }
 /* Each tab's bar under its files. */
 nautilus-bottom-bar { border-top: 1px solid var(--border-color); background-color: var(--headerbar-bg-color); }
 nautilus-bottom-bar > .toolbar { padding: 4px 6px; }
+
+/* What a shortcut just did, at the bottom of the window. */
+.shortcut-hint {
+  padding: 8px 14px;
+  border-radius: 12px;
+  background-color: color-mix(in srgb, var(--popover-bg-color) 94%, transparent);
+  color: var(--popover-fg-color);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.25), 0 0 0 1px rgb(0 0 0 / 0.08);
+}
+.quick-look-keys { padding: 6px 12px 8px 12px; }

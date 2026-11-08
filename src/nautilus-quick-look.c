@@ -76,6 +76,7 @@ struct _NautilusQuickLook
     GtkWidget *info_image;
     GtkLabel *info_name;
     GtkLabel *info_details;
+    GtkLabel *keys_hint;
 };
 
 G_DEFINE_TYPE (NautilusQuickLook, nautilus_quick_look, ADW_TYPE_BIN)
@@ -374,6 +375,32 @@ show_info (NautilusQuickLook *self,
 
 /* ------------------------------------------------------------ Showing */
 
+/* The keys that work for what's shown, at the bottom of the card. */
+static void
+update_keys_hint (NautilusQuickLook *self)
+{
+    const char *page = gtk_stack_get_visible_child_name (self->stack);
+    const char *text;
+
+    if (g_strcmp0 (page, "media") == 0)
+    {
+        text = _("K play · J/L −5/+5 s · Shift+A/D or ,/. frame · M mute · A/D previous/next · Tab full screen · Space close");
+    }
+    else if (shown_file (self) == NULL)
+    {
+        text = _("W/S zoom · Q fit · Z actual size · arrows move · N names · T marks · Enter open · Tab full screen · Space close");
+    }
+    else if (g_strcmp0 (page, "canvas") == 0)
+    {
+        text = _("W/S zoom · Q fit · Z actual size · A/D previous/next · 1–5 rate · Enter open · Tab full screen · Space close");
+    }
+    else
+    {
+        text = _("A/D previous/next · 1–5 rate · Enter open · Ctrl+O open · Tab full screen · Space close");
+    }
+    gtk_label_set_text (self->keys_hint, text);
+}
+
 static void
 show_current (NautilusQuickLook *self)
 {
@@ -417,6 +444,7 @@ show_current (NautilusQuickLook *self)
 
     update_title (self);
     update_rating (self);
+    update_keys_hint (self);
 }
 
 static void
@@ -526,6 +554,34 @@ on_key_pressed (GtkEventControllerKey *controller,
     if ((mods & ~GDK_SHIFT_MASK) != 0)
     {
         return GDK_EVENT_PROPAGATE;
+    }
+
+    /* Frame by frame: Shift+A/D (or Shift+arrows), comma and period. */
+    if (self->media != NULL)
+    {
+        int frames = 0;
+
+        if (mods == GDK_SHIFT_MASK && (key == GDK_KEY_a || key == GDK_KEY_Left))
+        {
+            frames = -1;
+        }
+        else if (mods == GDK_SHIFT_MASK && (key == GDK_KEY_d || key == GDK_KEY_Right))
+        {
+            frames = 1;
+        }
+        else if (keyval == GDK_KEY_comma || keyval == GDK_KEY_less)
+        {
+            frames = -1;
+        }
+        else if (keyval == GDK_KEY_period || keyval == GDK_KEY_greater)
+        {
+            frames = 1;
+        }
+        if (frames != 0)
+        {
+            step_frame (self, frames);
+            return GDK_EVENT_STOP;
+        }
     }
 
     switch (key)
@@ -720,6 +776,12 @@ on_key_pressed (GtkEventControllerKey *controller,
 
         default:
         {
+            /* Typing mustn't reach the files behind (and start a search),
+             * except into the text preview. */
+            if (!on_text && gdk_keyval_to_unicode (keyval) != 0)
+            {
+                return GDK_EVENT_STOP;
+            }
             return GDK_EVENT_PROPAGATE;
         }
     }
@@ -1004,6 +1066,14 @@ nautilus_quick_look_init (NautilusQuickLook *self)
                      G_SETTINGS_BIND_GET);
 
     adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar), build_header (self));
+
+    self->keys_hint = GTK_LABEL (gtk_label_new (NULL));
+    gtk_label_set_wrap (self->keys_hint, TRUE);
+    gtk_label_set_justify (self->keys_hint, GTK_JUSTIFY_CENTER);
+    gtk_widget_add_css_class (GTK_WIDGET (self->keys_hint), "quick-look-keys");
+    gtk_widget_add_css_class (GTK_WIDGET (self->keys_hint), "dim-label");
+    gtk_widget_add_css_class (GTK_WIDGET (self->keys_hint), "caption");
+    adw_toolbar_view_add_bottom_bar (ADW_TOOLBAR_VIEW (toolbar), GTK_WIDGET (self->keys_hint));
 
     self->stack = GTK_STACK (gtk_stack_new ());
     gtk_stack_add_named (self->stack, GTK_WIDGET (self->canvas), "canvas");

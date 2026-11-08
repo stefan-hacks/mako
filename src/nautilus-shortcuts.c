@@ -99,6 +99,7 @@ static const Command commands[] =
     { SECTION_VIEW, N_("Grid View"), "win.view-mode(uint32 4)", "<ctrl>2", "<alt>4" },
     { SECTION_VIEW, N_("Flat View"), "win.flat-view", NULL, "<alt>r" },
     { SECTION_VIEW, N_("Show Bottom Bar"), "win.bottom-bar", NULL, "<alt><shift>b" },
+    { SECTION_VIEW, N_("Show Shortcut Hints"), "win.shortcut-hints", NULL, NULL },
     { SECTION_VIEW, N_("Next View"), "win.view-step(1)", NULL, NULL },
     { SECTION_VIEW, N_("Previous View"), "win.view-step(-1)", NULL, NULL },
     { SECTION_VIEW, N_("Zoom In"), "view.zoom-in", "<ctrl>plus", "<ctrl><alt>w" },
@@ -299,6 +300,118 @@ run_command (GtkWindow     *window,
     }
 }
 
+/* ------------------------------------------------------ Hints */
+
+/* Like File Flier's: a small label at the bottom of the window saying what
+ * a shortcut just did. */
+#define HINT_MS 1400
+
+typedef struct
+{
+    GtkWidget *revealer;
+    GtkLabel *title;
+    GtkLabel *keys;
+    guint timeout;
+} Hint;
+
+static void
+hint_free (Hint *hint)
+{
+    g_clear_handle_id (&hint->timeout, g_source_remove);
+    g_free (hint);
+}
+
+static gboolean
+hint_hide (gpointer user_data)
+{
+    Hint *hint = user_data;
+
+    hint->timeout = 0;
+    gtk_revealer_set_reveal_child (GTK_REVEALER (hint->revealer), FALSE);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+show_hint (GtkWindow     *window,
+           const Command *command,
+           const char    *accel)
+{
+    GtkWidget *overlay = g_object_get_data (G_OBJECT (window), "quick-look-overlay");
+    Hint *hint = g_object_get_data (G_OBJECT (window), "nautilus-shortcut-hint");
+    g_autofree char *keys = accel != NULL ? accel_label (accel) : NULL;
+
+    if (overlay == NULL || !g_settings_get_boolean (nautilus_flier_settings (), "shortcut-hints"))
+    {
+        return;
+    }
+
+    if (hint == NULL)
+    {
+        GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
+
+        hint = g_new0 (Hint, 1);
+        hint->title = GTK_LABEL (gtk_label_new (NULL));
+        hint->keys = GTK_LABEL (gtk_label_new (NULL));
+        gtk_widget_add_css_class (GTK_WIDGET (hint->title), "heading");
+        gtk_widget_add_css_class (GTK_WIDGET (hint->keys), "dim-label");
+        gtk_widget_add_css_class (GTK_WIDGET (hint->keys), "monospace");
+        gtk_box_append (GTK_BOX (box), GTK_WIDGET (hint->title));
+        gtk_box_append (GTK_BOX (box), GTK_WIDGET (hint->keys));
+        gtk_widget_add_css_class (box, "shortcut-hint");
+
+        hint->revealer = gtk_revealer_new ();
+        gtk_revealer_set_transition_type (GTK_REVEALER (hint->revealer), GTK_REVEALER_TRANSITION_TYPE_CROSSFADE);
+        gtk_revealer_set_transition_duration (GTK_REVEALER (hint->revealer), 150);
+        gtk_revealer_set_child (GTK_REVEALER (hint->revealer), box);
+        gtk_widget_set_halign (hint->revealer, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign (hint->revealer, GTK_ALIGN_END);
+        gtk_widget_set_margin_bottom (hint->revealer, 64);
+        gtk_widget_set_can_target (hint->revealer, FALSE);
+        gtk_widget_set_can_focus (hint->revealer, FALSE);
+        gtk_overlay_add_overlay (GTK_OVERLAY (overlay), hint->revealer);
+        g_object_set_data_full (G_OBJECT (window), "nautilus-shortcut-hint", hint, (GDestroyNotify) hint_free);
+    }
+
+    gtk_label_set_text (hint->title, _(command->title));
+    gtk_label_set_text (hint->keys, keys != NULL ? keys : "");
+    gtk_widget_set_visible (GTK_WIDGET (hint->keys), keys != NULL);
+    gtk_revealer_set_reveal_child (GTK_REVEALER (hint->revealer), TRUE);
+    g_clear_handle_id (&hint->timeout, g_source_remove);
+    hint->timeout = g_timeout_add (HINT_MS, hint_hide, hint);
+}
+
+/* Keys that are plain typing or moving about aren't worth a hint. */
+static gboolean
+worth_a_hint (const Command *command,
+              const char    *accel)
+{
+    guint key;
+    GdkModifierType mods;
+
+    if (!gtk_accelerator_parse (accel, &key, &mods))
+    {
+        return FALSE;
+    }
+
+    return !g_str_equal (command->action, "view.preview-selection") &&
+           (mods != 0 || (key >= GDK_KEY_F1 && key <= GDK_KEY_F12) || key == GDK_KEY_Delete) &&
+           !(mods == GDK_CONTROL_MASK && (key == GDK_KEY_k || key == GDK_KEY_question));
+}
+
+/* What a shortcut runs, and by which key. */
+typedef struct
+{
+    const Command *command;
+    char *accel;
+} Binding;
+
+static void
+binding_free (Binding *binding)
+{
+    g_free (binding->accel);
+    g_free (binding);
+}
+
 /* ----------------------------------------------------- The controller */
 
 /* Whether a key may act while typing: Alt and function keys aren't typing. */
@@ -345,14 +458,18 @@ on_command_key (GtkWidget *widget,
                 GVariant  *args,
                 gpointer   user_data)
 {
-    const Command *command = user_data;
+    Binding *binding = user_data;
 
     if (!key_allowed (widget, args))
     {
         return FALSE;
     }
 
-    run_command (GTK_WINDOW (widget), command);
+    if (worth_a_hint (binding->command, binding->accel))
+    {
+        show_hint (GTK_WINDOW (widget), binding->command, binding->accel);
+    }
+    run_command (GTK_WINDOW (widget), binding->command);
     return TRUE;
 }
 
@@ -363,6 +480,21 @@ on_swallowed_key (GtkWidget *widget,
 {
     /* An old key of a changed command: upstream's binding mustn't see it. */
     return key_allowed (widget, args);
+}
+
+/* Upstream's own key, left to upstream's binding: only the hint. */
+static gboolean
+on_hint_key (GtkWidget *widget,
+             GVariant  *args,
+             gpointer   user_data)
+{
+    Binding *binding = user_data;
+
+    if (key_allowed (widget, args))
+    {
+        show_hint (GTK_WINDOW (widget), binding->command, binding->accel);
+    }
+    return FALSE;
 }
 
 static void
@@ -379,8 +511,14 @@ add_shortcut (GtkShortcutController *controller,
         return;
     }
 
+    Binding *binding = g_new0 (Binding, 1);
+
+    binding->command = command;
+    binding->accel = g_strdup (accel);
+
     GtkShortcut *shortcut = gtk_shortcut_new (trigger,
-                                              gtk_callback_action_new (func, (gpointer) command, NULL));
+                                              gtk_callback_action_new (func, binding,
+                                                                       (GDestroyNotify) binding_free));
 
     gtk_shortcut_set_arguments (shortcut, g_variant_new_boolean (works_in_text (trigger)));
     gtk_shortcut_controller_add_shortcut (controller, shortcut);
@@ -410,6 +548,13 @@ fill_controller (GtkShortcutController *controller)
             /* Upstream's keys work as they are; add ours. */
             g_auto (GStrv) extras = split_keys (command->extras);
 
+            for (guint d = 0; defaults[d] != NULL; d++)
+            {
+                if (worth_a_hint (command, defaults[d]))
+                {
+                    add_shortcut (controller, defaults[d], on_hint_key, command);
+                }
+            }
             for (guint k = 0; extras[k] != NULL; k++)
             {
                 add_shortcut (controller, extras[k], on_command_key, command);
