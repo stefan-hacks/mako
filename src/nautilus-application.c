@@ -986,7 +986,7 @@ nautilus_application_startup (GApplication *app)
 
     g_assert (display == NULL || gdk_display_get_default () == display);
 
-    gtk_window_set_default_icon_name (APPLICATION_ID);
+    gtk_window_set_default_icon_name ("org.gnome.Nautilus");
 
     /* initialize preferences and create the global GSettings objects */
     nautilus_global_preferences_init ();

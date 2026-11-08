@@ -2854,6 +2854,7 @@ nautilus_window_show_about_dialog (NautilusWindow *window)
     dialog = adw_about_dialog_new_from_appdata ("/org/gnome/nautilus/appdata", NULL);
 
     adw_about_dialog_set_version (ADW_ABOUT_DIALOG (dialog), VERSION);
+    adw_about_dialog_set_application_icon (ADW_ABOUT_DIALOG (dialog), "org.gnome.Nautilus");
     adw_about_dialog_set_debug_info (ADW_ABOUT_DIALOG (dialog), debug_info);
     adw_about_dialog_set_copyright (ADW_ABOUT_DIALOG (dialog), "© 1999 The Files Authors");
     adw_about_dialog_set_developers (ADW_ABOUT_DIALOG (dialog), developers);

@@ -1,4 +1,4 @@
-<img src="docs/media/mako.svg" width="96" align="right" alt="">
+<img src="docs/media/mako.png" width="96" align="right" alt="">
 
 # Mako
 
@@ -113,18 +113,18 @@ Every common command has a key on the left side of the keyboard, so you can
 keep your right hand on the mouse. GNOME's usual keys still work as well.
 The layout follows a few simple rules:
 
-- **`Alt` + WASD moves:** `W` goes up, `A` back, `D` forward, `S` opens (goes in). `Q` goes home.
-- **`Alt` + a letter toggles panels and views:** `B` the sidebar ("bar"), `E` the inspector ("examine"), `R` the flat view ("recursive"), `V` hidden files ("visible"). `1` to `4` pick the view.
-- **`Shift` gives the stronger version:** `Alt+S` opens and `Alt+Shift+S` opens in a new tab. `Alt+X` moves to the trash and `Alt+Shift+X` deletes. `Alt+E` shows the inspector and `Alt+Shift+E` moves it to the next side. `Alt+Shift+B` toggles the bottom bar.
+- **`Alt` + WASD moves:** `W` goes up, `A` back, `D` forward, `S` opens (goes in). `Alt+Shift+W` goes all the way up, to your home folder.
+- **`Alt` + a letter toggles panels and views:** `Q` the sidebar (the key at the left edge, like the sidebar), `E` the inspector ("examine"), `R` the flat view ("recursive"), `V` hidden files ("visible"). `1` to `4` pick the view.
+- **`Shift` gives the stronger version:** `Alt+S` opens and `Alt+Shift+S` opens in a new tab. `Alt+X` moves to the trash and `Alt+Shift+X` deletes. `Alt+E` shows the inspector and `Alt+Shift+E` moves it to the next side. `Alt+Q` toggles the sidebar and `Alt+Shift+Q` the bottom bar.
 - **`Ctrl+Alt` + a key marks files:** numbers rate, `A` edits tags.
 - **`Ctrl` + arrows walk the sidebar.**
 
 <table>
 <tr><th>Navigate</th><th>Key</th><th>Panels and views</th><th>Key</th></tr>
 <tr><td>Back / Forward</td><td><kbd>Alt</kbd>+<kbd>A</kbd> / <kbd>Alt</kbd>+<kbd>D</kbd></td><td>List / Tree / Columns / Grid</td><td><kbd>Alt</kbd>+<kbd>1</kbd> … <kbd>4</kbd></td></tr>
-<tr><td>Parent folder</td><td><kbd>Alt</kbd>+<kbd>W</kbd></td><td>Sidebar</td><td><kbd>Alt</kbd>+<kbd>B</kbd> (<kbd>F9</kbd>)</td></tr>
+<tr><td>Parent folder</td><td><kbd>Alt</kbd>+<kbd>W</kbd></td><td>Sidebar</td><td><kbd>Alt</kbd>+<kbd>Q</kbd> (<kbd>F9</kbd>)</td></tr>
 <tr><td>Open / in new tab</td><td><kbd>Alt</kbd>+<kbd>S</kbd> / <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>Inspector / move it</td><td><kbd>Alt</kbd>+<kbd>E</kbd> / <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> (<kbd>F4</kbd>)</td></tr>
-<tr><td>Home folder</td><td><kbd>Alt</kbd>+<kbd>Q</kbd></td><td>Bottom bar</td><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd></td></tr>
+<tr><td>Home folder</td><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd></td><td>Bottom bar</td><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>Q</kbd></td></tr>
 <tr><td>Enter a location</td><td><kbd>Ctrl</kbd>+<kbd>E</kbd> (<kbd>Ctrl</kbd>+<kbd>L</kbd>)</td><td>Flat view</td><td><kbd>Alt</kbd>+<kbd>R</kbd></td></tr>
 <tr><td>Search here / everywhere</td><td><kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td><td>Hidden files</td><td><kbd>Alt</kbd>+<kbd>V</kbd></td></tr>
 <tr><td>Sidebar up / down</td><td><kbd>Ctrl</kbd>+<kbd>↑</kbd> / <kbd>Ctrl</kbd>+<kbd>↓</kbd></td><td>Next grouping</td><td><kbd>Ctrl</kbd>+<kbd>G</kbd></td></tr>
@@ -210,5 +210,6 @@ The README pictures were taken from inside the app (run with
 
 ## License
 
-GPL-3.0-or-later, like Nautilus. See [LICENSE](LICENSE). GNOME's original
+GPL-3.0-or-later, like Nautilus. See [LICENSE](LICENSE). The icon is the Files icon of the
+[Yaru](https://github.com/ubuntu/yaru) theme (CC-BY-SA 4.0). GNOME's original
 README is in [README.nautilus.md](README.nautilus.md).
