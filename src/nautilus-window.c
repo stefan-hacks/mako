@@ -67,6 +67,7 @@
 #include "nautilus-signaller.h"
 #include "nautilus-toolbar.h"
 #include "nautilus-labels.h"
+#include "nautilus-shortcuts.h"
 #include "nautilus-trash-monitor.h"
 #include "nautilus-ui-utilities.h"
 #include "nautilus-window-slot.h"
@@ -2091,6 +2092,8 @@ nautilus_window_init (NautilusWindow *window)
                       G_CALLBACK (on_modifiers_changed), NULL);
     g_signal_connect (window, "notify::is-active",
                       G_CALLBACK (on_window_active_changed), NULL);
+
+    nautilus_shortcuts_attach (GTK_WINDOW (window));
 }
 
 static void

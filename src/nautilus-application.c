@@ -618,7 +618,7 @@ nautilus_init_application_actions (NautilusApplication *app)
     nautilus_application_set_accelerator (G_APPLICATION (app),
                                           "app.clone-window", "<Primary>n");
     nautilus_application_set_accelerator (G_APPLICATION (app),
-                                          "app.help", "F1");
+                                          "app.help", "<shift>F1");
     nautilus_application_set_accelerator (G_APPLICATION (app),
                                           "app.quit", "<Primary>q");
     nautilus_application_set_accelerator (G_APPLICATION (app),

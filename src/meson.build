@@ -242,6 +242,8 @@ libnautilus_sources = [
   'nautilus-quick-look.c',
   'nautilus-quick-look.h',
   'nautilus-marks-cell.h',
+  'nautilus-shortcuts.c',
+  'nautilus-shortcuts.h',
   'nautilus-star-cell.c',
   'nautilus-star-cell.h',
   'nautilus-starred-directory.c',
