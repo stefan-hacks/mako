@@ -109,7 +109,6 @@ on_filter_changed (NautilusBottomBar *self)
     if (self->words[0] == NULL)
     {
         g_clear_pointer (&self->words, g_strfreev);
-    g_clear_object (&self->sort_menu);
         nautilus_window_slot_set_filter (self->slot, NULL);
         return;
     }
@@ -531,6 +530,7 @@ nautilus_bottom_bar_dispose (GObject *object)
 {
     NautilusBottomBar *self = NAUTILUS_BOTTOM_BAR (object);
 
+    g_clear_object (&self->sort_menu);
     if (self->filter != NULL)
     {
         /* Nothing to filter with once we're gone. */
@@ -586,4 +586,11 @@ nautilus_bottom_bar_new (NautilusWindowSlot *slot)
     nautilus_shortcuts_add_tooltips (GTK_WIDGET (self));
 
     return GTK_WIDGET (self);
+}
+
+void
+nautilus_bottom_bar_set_filter_text (NautilusBottomBar *self,
+                                     const char        *text)
+{
+    gtk_editable_set_text (GTK_EDITABLE (self->filter_entry), text);
 }

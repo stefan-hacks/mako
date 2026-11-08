@@ -66,6 +66,7 @@
 #include "nautilus-tile-layout.h"
 #include "nautilus-signaller.h"
 #include "nautilus-toolbar.h"
+#include "nautilus-bottom-bar.h"
 #include "nautilus-files-view.h"
 #include "nautilus-inspector.h"
 #include "nautilus-columns.h"
@@ -1685,7 +1686,9 @@ capture_to_png (NautilusWindow *window,
     g_autoptr (GskRenderNode) node = NULL;
     g_autoptr (GdkTexture) texture = NULL;
     int width = gtk_widget_get_width (widget), height = gtk_widget_get_height (widget);
-    double scale = gdk_surface_get_scale (gtk_native_get_surface (GTK_NATIVE (window)));
+    const char *scale_env = g_getenv ("FLIER_CAPTURE_SCALE");
+    double scale = scale_env != NULL ? g_ascii_strtod (scale_env, NULL)
+                                     : gdk_surface_get_scale (gtk_native_get_surface (GTK_NATIVE (window)));
 
     gtk_snapshot_scale (snapshot, scale, scale);
     gdk_paintable_snapshot (paintable, snapshot, width, height);
@@ -1742,6 +1745,115 @@ capture_find_scroller (GtkWidget *widget)
     return NULL;
 }
 
+static void
+capture_mark (const char *label)
+{
+    g_autofree char *path = NULL;
+    g_autofree char *line = NULL;
+    g_autoptr (GFileOutputStream) out = NULL;
+
+    if (capture_timer == 0 || capture_dir == NULL)
+    {
+        return;
+    }
+    path = g_build_filename (capture_dir, "markers.tsv", NULL);
+    line = g_strdup_printf ("%" G_GINT64_FORMAT "\t%s\n", (g_get_monotonic_time () - capture_start) / 1000, label);
+    g_autoptr (GFile) file = g_file_new_for_path (path);
+
+    out = g_file_append_to (file, G_FILE_CREATE_NONE, NULL, NULL);
+    if (out != NULL)
+    {
+        g_output_stream_write_all (G_OUTPUT_STREAM (out), line, strlen (line), NULL, NULL, NULL);
+    }
+}
+
+static GtkWidget *
+capture_find_bottom_bar (GtkWidget *widget)
+{
+    if (NAUTILUS_IS_BOTTOM_BAR (widget) && gtk_widget_get_mapped (widget))
+    {
+        return widget;
+    }
+    for (GtkWidget *child = gtk_widget_get_first_child (widget); child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        GtkWidget *found = capture_find_bottom_bar (child);
+
+        if (found != NULL)
+        {
+            return found;
+        }
+    }
+    return NULL;
+}
+
+/* A benchmark: how long from a command until the folder is loaded
+ * ("ready") and until that's on screen ("painted"). One JSON line per run
+ * goes to FLIER_BENCH_LOG. */
+typedef struct
+{
+    NautilusWindow *window;
+    char *name;
+    gint64 start, ready;
+    guint poll_id;
+    gulong paint_id;
+    GdkFrameClock *clock;
+} BenchRun;
+
+static void
+bench_finish (BenchRun *run)
+{
+    const char *log = g_getenv ("FLIER_BENCH_LOG");
+    gint64 painted = g_get_monotonic_time ();
+
+    g_signal_handler_disconnect (run->clock, run->paint_id);
+    if (log != NULL)
+    {
+        g_autofree char *line = g_strdup_printf ("{\"name\": \"%s\", \"ready_ms\": %.2f, \"painted_ms\": %.2f}\n",
+                                                 run->name, (run->ready - run->start) / 1000.0,
+                                                 (painted - run->start) / 1000.0);
+        g_autoptr (GFile) file = g_file_new_for_path (log);
+        g_autoptr (GFileOutputStream) out = g_file_append_to (file, G_FILE_CREATE_NONE, NULL, NULL);
+
+        if (out != NULL)
+        {
+            g_output_stream_write_all (G_OUTPUT_STREAM (out), line, strlen (line), NULL, NULL, NULL);
+        }
+    }
+    g_free (run->name);
+    g_free (run);
+}
+
+static void
+bench_after_paint (GdkFrameClock *clock,
+                   BenchRun      *run)
+{
+    bench_finish (run);
+}
+
+static gboolean
+bench_poll (gpointer data)
+{
+    BenchRun *run = data;
+    NautilusWindowSlot *slot = run->window->active_slot;
+    NautilusFilesView *view = slot != NULL ? nautilus_window_slot_get_current_view (slot) : NULL;
+
+    if (slot == NULL || nautilus_window_slot_get_loading (slot) ||
+        view == NULL || nautilus_files_view_get_loading (view))
+    {
+        return G_SOURCE_CONTINUE;
+    }
+
+    run->ready = g_get_monotonic_time ();
+    run->poll_id = 0;
+    run->clock = gtk_widget_get_frame_clock (GTK_WIDGET (run->window));
+    run->paint_id = g_signal_connect (run->clock, "after-paint", G_CALLBACK (bench_after_paint), run);
+    gtk_widget_queue_draw (GTK_WIDGET (run->window));
+    return G_SOURCE_REMOVE;
+}
+
+static void action_flier_capture (GSimpleAction *action, GVariant *parameter, gpointer user_data);
+
 static gboolean
 capture_tick (gpointer data)
 {
@@ -1765,7 +1877,39 @@ action_flier_capture (GSimpleAction *action,
     NautilusFilesView *view = window->active_slot != NULL
                               ? nautilus_window_slot_get_current_view (window->active_slot) : NULL;
 
-    if (g_str_has_prefix (command, "shot:"))
+    if (g_str_has_prefix (command, "key:") || g_str_has_prefix (command, "act:") ||
+        g_str_has_prefix (command, "go:") || g_str_has_prefix (command, "select:") ||
+        g_str_has_prefix (command, "filter:") || g_str_has_prefix (command, "set:"))
+    {
+        capture_mark (command);
+    }
+
+    if (g_str_has_prefix (command, "mark:"))
+    {
+        capture_mark (command + 5);
+    }
+    else if (g_str_has_prefix (command, "bench:") && strchr (command + 6, ':') != NULL)
+    {
+        /* bench:NAME:COMMAND */
+        const char *rest = strchr (command + 6, ':') + 1;
+        BenchRun *run = g_new0 (BenchRun, 1);
+
+        run->window = window;
+        run->name = g_strndup (command + 6, rest - 1 - (command + 6));
+        run->start = g_get_monotonic_time ();
+        action_flier_capture (action, g_variant_new_string (rest), user_data);
+        run->poll_id = g_timeout_add (1, bench_poll, run);
+    }
+    else if (g_str_has_prefix (command, "filter:"))
+    {
+        GtkWidget *bar = capture_find_bottom_bar (GTK_WIDGET (window));
+
+        if (bar != NULL)
+        {
+            nautilus_bottom_bar_set_filter_text (NAUTILUS_BOTTOM_BAR (bar), command + 7);
+        }
+    }
+    else if (g_str_has_prefix (command, "shot:"))
     {
         capture_to_png (window, command + 5);
     }
@@ -1870,6 +2014,7 @@ action_flier_capture (GSimpleAction *action,
         {
             gtk_window_unmaximize (GTK_WINDOW (window));
             gtk_window_set_default_size (GTK_WINDOW (window), w, h);
+            gtk_window_present (GTK_WINDOW (window));
         }
     }
 }

@@ -27,6 +27,10 @@ gboolean   nautilus_bottom_bar_handle_event (NautilusBottomBar     *self,
                                              guint                  keyval,
                                              GdkModifierType        state);
 
+/* Types @text into the filter, as if typed. */
+void       nautilus_bottom_bar_set_filter_text (NautilusBottomBar *self,
+                                                const char        *text);
+
 /* Whether the bar is on (the "bottom-bar" setting). */
 gboolean   nautilus_bottom_bar_enabled      (void);
 
