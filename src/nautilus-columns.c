@@ -21,7 +21,10 @@
 
 #include "nautilus-file.h"
 #include "nautilus-files-view.h"
+#include "nautilus-enums.h"
+#include "nautilus-icon-info.h"
 #include "nautilus-labels.h"
+#include "nautilus-metadata.h"
 #include "nautilus-list-base.h"
 #include "nautilus-query.h"
 #include "nautilus-view-info.h"
@@ -32,7 +35,8 @@
 #define ATTRIBUTES G_FILE_ATTRIBUTE_STANDARD_NAME "," \
     G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME "," \
     G_FILE_ATTRIBUTE_STANDARD_TYPE "," \
-    G_FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON "," \
+    G_FILE_ATTRIBUTE_STANDARD_ICON "," \
+    "metadata::" NAUTILUS_METADATA_KEY_FOLDER_COLOR "," \
     G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN "," \
     G_FILE_ATTRIBUTE_STANDARD_IS_BACKUP
 
@@ -106,6 +110,7 @@ typedef struct
     char *highlight;      /* name of the child on the way down, if any */
     GtkSingleSelection *selection;
     GtkDirectoryList *list;
+    int icon_size;        /* the list view's, when the column was made */
 } Column;
 
 static void
@@ -151,9 +156,12 @@ setup_row (GtkSignalListItemFactory *factory,
            gpointer                  user_data)
 {
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    Column *column = user_data;
     GtkWidget *icon = gtk_image_new ();
     GtkWidget *label = gtk_label_new (NULL);
     GtkWidget *arrow = gtk_image_new_from_icon_name ("go-next-symbolic");
+
+    gtk_image_set_pixel_size (GTK_IMAGE (icon), column->icon_size);
 
     gtk_label_set_xalign (GTK_LABEL (label), 0);
     gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_MIDDLE);
@@ -176,7 +184,28 @@ bind_row (GtkSignalListItemFactory *factory,
     GtkWidget *label = gtk_widget_get_next_sibling (icon);
     GtkWidget *arrow = gtk_widget_get_next_sibling (label);
 
-    gtk_image_set_from_gicon (GTK_IMAGE (icon), g_file_info_get_symbolic_icon (info));
+    Column *column = user_data;
+    GIcon *gicon = g_file_info_get_icon (info);
+    g_autoptr (GdkPaintable) paintable = NULL;
+
+    /* The same icons as the files: the theme's, in the folder's color. */
+    if (gicon != NULL)
+    {
+        g_autoptr (NautilusIconInfo) icon_info = nautilus_icon_info_lookup (gicon, column->icon_size,
+                                                                           gtk_widget_get_scale_factor (icon));
+        const char *color = g_file_info_get_attribute_string (info, "metadata::" NAUTILUS_METADATA_KEY_FOLDER_COLOR);
+
+        paintable = nautilus_icon_info_get_paintable (icon_info);
+        if (paintable != NULL && g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY &&
+            color != NULL && color[0] >= '0' && color[0] <= '7' && color[1] == '\0')
+        {
+            GdkPaintable *tinted = nautilus_labels_tint_paintable (paintable, color[0] - '0');
+
+            g_object_unref (paintable);
+            paintable = tinted;
+        }
+    }
+    gtk_image_set_from_paintable (GTK_IMAGE (icon), paintable);
     gtk_label_set_text (GTK_LABEL (label), g_file_info_get_display_name (info));
     gtk_widget_set_visible (arrow, g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY);
 }
@@ -255,6 +284,36 @@ on_loading (GtkDirectoryList *list,
     }
 }
 
+/* The size of the list view's icons, so the columns match it. */
+static int
+list_icon_size (NautilusColumns *self)
+{
+    NautilusFilesView *view = self->slot != NULL ? nautilus_window_slot_get_current_view (self->slot) : NULL;
+
+    if (view == NULL)
+    {
+        return NAUTILUS_LIST_ICON_SIZE_SMALL;
+    }
+
+    switch (nautilus_list_base_get_zoom_level (nautilus_files_view_get_private_list_base (view)))
+    {
+        case NAUTILUS_LIST_ZOOM_LEVEL_MEDIUM:
+        {
+            return NAUTILUS_LIST_ICON_SIZE_MEDIUM;
+        }
+
+        case NAUTILUS_LIST_ZOOM_LEVEL_LARGE:
+        {
+            return NAUTILUS_LIST_ICON_SIZE_LARGE;
+        }
+
+        default:
+        {
+            return NAUTILUS_LIST_ICON_SIZE_SMALL;
+        }
+    }
+}
+
 static GtkWidget *
 column_new (NautilusColumns *self,
             GFile           *directory,
@@ -288,8 +347,9 @@ column_new (NautilusColumns *self,
     gtk_single_selection_set_selected (column->selection, GTK_INVALID_LIST_POSITION);
     g_signal_connect (column->list, "notify::loading", G_CALLBACK (on_loading), column);
 
-    g_signal_connect (factory, "setup", G_CALLBACK (setup_row), NULL);
-    g_signal_connect (factory, "bind", G_CALLBACK (bind_row), NULL);
+    column->icon_size = list_icon_size (self);
+    g_signal_connect (factory, "setup", G_CALLBACK (setup_row), column);
+    g_signal_connect (factory, "bind", G_CALLBACK (bind_row), column);
     view = gtk_list_view_new (GTK_SELECTION_MODEL (column->selection), factory);
     gtk_list_view_set_single_click_activate (GTK_LIST_VIEW (view), TRUE);
     g_signal_connect (view, "activate", G_CALLBACK (on_activate), column);
