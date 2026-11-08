@@ -11,11 +11,9 @@ It keeps the native GNOME look (GTK 4 and libadwaita) and stays close to
 upstream, so it is easy to follow new Nautilus releases. It is based on
 Nautilus **50.2.2**.
 
-[![Watch the Mako video (1:48)](docs/media/promo-poster.png)](docs/media/mako-promo.mp4)
+https://github.com/user-attachments/assets/1a1a578e-7426-485a-a1e6-026c1ab35ce3
 
-▶ **[Watch the video (1:48)](docs/media/mako-promo.mp4)**: tiles, views, Quick Look, colors, tags and speed tests.
 
-![Mako with the inspector open](docs/media/hero.png)
 
 > Mako is a personal fork. It is not made or supported by the GNOME
 > project. Please report problems here, not to GNOME.
