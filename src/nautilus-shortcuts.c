@@ -25,6 +25,7 @@
 #include "nautilus-bookmark.h"
 #include "nautilus-bookmark-list.h"
 #include "nautilus-labels.h"
+#include "nautilus-quick-look.h"
 #include "nautilus-window-slot.h"
 
 typedef struct
@@ -95,7 +96,7 @@ static const Command commands[] =
     { SECTION_VIEW, N_("List View"), "win.view-mode(uint32 1)", "<ctrl>1", "<alt>1" },
     { SECTION_VIEW, N_("Columns View"), "win.view-mode(uint32 2)", NULL, "<alt>2" },
     { SECTION_VIEW, N_("Grid View"), "win.view-mode(uint32 3)", "<ctrl>2", "<alt>3" },
-    { SECTION_VIEW, N_("Flat View"), "win.flat-view", NULL, "<alt>f" },
+    { SECTION_VIEW, N_("Flat View"), "win.flat-view", NULL, "<alt>r" },
     { SECTION_VIEW, N_("Next View"), "win.view-step(1)", NULL, NULL },
     { SECTION_VIEW, N_("Previous View"), "win.view-step(-1)", NULL, NULL },
     { SECTION_VIEW, N_("Zoom In"), "view.zoom-in", "<ctrl>plus", "<ctrl><alt>w" },
@@ -321,9 +322,10 @@ key_allowed (GtkWidget *widget,
     GtkWindow *window = GTK_WINDOW (widget);
     GtkWidget *focus = gtk_window_get_focus (window);
 
-    /* Not while a dialog of the window has the keys. */
-    if (ADW_IS_APPLICATION_WINDOW (window) &&
-        adw_application_window_get_visible_dialog (ADW_APPLICATION_WINDOW (window)) != NULL)
+    /* Not while a dialog of the window, or Quick Look, has the keys. */
+    if ((ADW_IS_APPLICATION_WINDOW (window) &&
+         adw_application_window_get_visible_dialog (ADW_APPLICATION_WINDOW (window)) != NULL) ||
+        nautilus_quick_look_has_keys (window))
     {
         return FALSE;
     }
@@ -1317,6 +1319,24 @@ on_search_key (GtkEventControllerKey *controller,
     return GDK_EVENT_PROPAGATE;
 }
 
+/* Esc closes at once, also with text typed; F1 again too. */
+static gboolean
+on_dialog_key (GtkEventControllerKey *controller,
+               guint                  keyval,
+               guint                  keycode,
+               GdkModifierType        state,
+               Overview              *overview)
+{
+    if ((state & gtk_accelerator_get_default_mod_mask ()) == 0 &&
+        (keyval == GDK_KEY_Escape || keyval == GDK_KEY_F1))
+    {
+        adw_dialog_close (overview->dialog);
+        return GDK_EVENT_STOP;
+    }
+
+    return GDK_EVENT_PROPAGATE;
+}
+
 void
 nautilus_shortcuts_dialog_present (GtkWindow *window)
 {
@@ -1372,6 +1392,11 @@ nautilus_shortcuts_dialog_present (GtkWindow *window)
     adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar), header);
     adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar), GTK_WIDGET (overview->toasts));
     adw_dialog_set_child (overview->dialog, toolbar);
+
+    keys = gtk_event_controller_key_new ();
+    gtk_event_controller_set_propagation_phase (keys, GTK_PHASE_CAPTURE);
+    g_signal_connect (keys, "key-pressed", G_CALLBACK (on_dialog_key), overview);
+    gtk_widget_add_controller (GTK_WIDGET (overview->dialog), keys);
 
     /* Typing anywhere searches. */
     gtk_search_entry_set_key_capture_widget (overview->search, GTK_WIDGET (overview->dialog));

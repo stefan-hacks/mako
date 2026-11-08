@@ -1,11 +1,12 @@
 /*
- * nautilus-quick-look.h: the built-in Quick Look window
+ * nautilus-quick-look.h: the built-in Quick Look
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #pragma once
 
+#include <adwaita.h>
 #include <gtk/gtk.h>
 
 #include "nautilus-types.h"
@@ -22,6 +23,10 @@ void     nautilus_quick_look_toggle     (NautilusFilesView *view,
 void     nautilus_quick_look_update     (NautilusFilesView *view,
                                          GList             *selection);
 gboolean nautilus_quick_look_is_visible (void);
+/* Whether it is up in @window, where it takes the keys. */
+gboolean nautilus_quick_look_has_keys   (GtkWindow         *window);
+/* Gives @window the overlay Quick Look shows in. Once, when it's built. */
+void     nautilus_quick_look_attach     (AdwApplicationWindow *window);
 void     nautilus_quick_look_close      (void);
 
 G_END_DECLS

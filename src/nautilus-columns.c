@@ -692,7 +692,7 @@ on_key_pressed (GtkEventControllerKey *controller,
 
     if (!columns_on (self) || (state & gtk_accelerator_get_default_mod_mask ()) != 0 ||
         focus == NULL || GTK_IS_EDITABLE (focus) || GTK_IS_TEXT_VIEW (focus) ||
-        !gtk_widget_is_ancestor (focus, self->content))
+        self->content == NULL || !gtk_widget_is_ancestor (focus, self->content))
     {
         return GDK_EVENT_PROPAGATE;
     }

@@ -69,6 +69,7 @@
 #include "nautilus-inspector.h"
 #include "nautilus-columns.h"
 #include "nautilus-labels.h"
+#include "nautilus-quick-look.h"
 #include "nautilus-shortcuts.h"
 #include "nautilus-trash-monitor.h"
 #include "nautilus-ui-utilities.h"
@@ -190,9 +191,17 @@ malloc_trim_idle_cb (gpointer user_data)
 static AdwTabPage *
 get_current_page (NautilusWindow *window)
 {
+    /* The tab right-clicked, while its menu is up. With tiles it can be in
+     * another tile's view, which doesn't take it as a parent for new tabs. */
     if (window->menu_page != NULL)
     {
-        return window->menu_page;
+        for (int i = adw_tab_view_get_n_pages (window->tab_view) - 1; i >= 0; i--)
+        {
+            if (adw_tab_view_get_nth_page (window->tab_view, i) == window->menu_page)
+            {
+                return window->menu_page;
+            }
+        }
     }
 
     return adw_tab_view_get_selected_page (window->tab_view);
@@ -349,7 +358,8 @@ tab_view_setup_menu_cb (AdwTabView     *tab_view,
     int position, n_pages;
     gboolean menu_is_closed = (page == NULL);
 
-    window->menu_page = page;
+    /* Weak: the tile and its tabs can go before the menu says it closed. */
+    g_set_weak_pointer (&window->menu_page, page);
 
     if (!menu_is_closed)
     {
@@ -2410,6 +2420,7 @@ nautilus_window_init (NautilusWindow *window)
     g_signal_connect (window, "notify::is-active",
                       G_CALLBACK (on_window_active_changed), NULL);
 
+    nautilus_quick_look_attach (ADW_APPLICATION_WINDOW (window));
     nautilus_shortcuts_attach (GTK_WINDOW (window));
     setup_inspector (window);
 }

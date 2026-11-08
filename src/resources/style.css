@@ -433,3 +433,13 @@ nautilus-inspector .star { min-width: 28px; padding-left: 2px; padding-right: 2p
 nautilus-columns .miller-column-box { background-color: var(--view-bg-color); }
 nautilus-columns .miller-column-title { padding: 8px 12px 4px 12px; opacity: 0.8; }
 nautilus-columns .miller-column { background: none; }
+
+/* Quick Look, a card over the dimmed window. */
+nautilus-quick-look, .quick-look { background-color: alpha(black, 0.32); }
+.quick-look-card {
+  margin: 28px;
+  border-radius: 12px;
+  background-color: var(--window-bg-color);
+  box-shadow: 0 2px 6px alpha(black, 0.2), 0 8px 32px alpha(black, 0.35);
+}
+.quick-look.fullscreen .quick-look-card { margin: 0; border-radius: 0; box-shadow: none; }

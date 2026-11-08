@@ -1,5 +1,5 @@
 /*
- * nautilus-quick-look.c: the built-in Quick Look window
+ * nautilus-quick-look.c: the built-in Quick Look, a card over the window
  *
  * Space shows the selection: one picture to zoom into, a video or song to
  * play, a text file with line numbers, or a big thumbnail and the details
@@ -14,6 +14,9 @@
  *   N, T              names, ratings and tags on the canvas
  *   Enter, Ctrl+O     open
  *   Tab               fullscreen
+ *
+ * It lives in the window rather than in a window of its own, so it opens
+ * and closes as fast as we like, not at the speed of the shell's animation.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -39,11 +42,16 @@
 #define FRAME_USEC (G_USEC_PER_SEC / 30)
 
 #define NAUTILUS_TYPE_QUICK_LOOK (nautilus_quick_look_get_type ())
-G_DECLARE_FINAL_TYPE (NautilusQuickLook, nautilus_quick_look, NAUTILUS, QUICK_LOOK, AdwWindow)
+G_DECLARE_FINAL_TYPE (NautilusQuickLook, nautilus_quick_look, NAUTILUS, QUICK_LOOK, AdwBin)
 
 struct _NautilusQuickLook
 {
-    AdwWindow parent_instance;
+    AdwBin parent_instance;
+
+    GtkWidget *card;
+    AdwAnimation *fade;
+    gboolean shown;            /* open, or opening */
+    gboolean made_fullscreen;  /* the window, by Tab */
 
     NautilusFilesView *view;   /* weak */
     GList *files;              /* the selection shown */
@@ -70,7 +78,16 @@ struct _NautilusQuickLook
     GtkLabel *info_details;
 };
 
-G_DEFINE_TYPE (NautilusQuickLook, nautilus_quick_look, ADW_TYPE_WINDOW)
+G_DEFINE_TYPE (NautilusQuickLook, nautilus_quick_look, ADW_TYPE_BIN)
+
+/* Twice as fast as the shell's dialog animation. */
+#define FADE_IN_MS 80
+#define FADE_OUT_MS 60
+
+static void ql_hide (NautilusQuickLook *self);
+static gboolean ql_is_fullscreen (NautilusQuickLook *self);
+static void ql_set_fullscreen (NautilusQuickLook *self,
+                               gboolean           fullscreen);
 
 static NautilusQuickLook *quick_look = NULL;
 
@@ -181,7 +198,6 @@ update_title (NautilusQuickLook *self)
         details = file_details (file, w, h);
         adw_window_title_set_title (self->title, nautilus_file_get_display_name (file));
         adw_window_title_set_subtitle (self->title, details);
-        gtk_window_set_title (GTK_WINDOW (self), nautilus_file_get_display_name (file));
     }
     else
     {
@@ -191,7 +207,6 @@ update_title (NautilusQuickLook *self)
 
         adw_window_title_set_title (self->title, title);
         adw_window_title_set_subtitle (self->title, details);
-        gtk_window_set_title (GTK_WINDOW (self), title);
     }
 }
 
@@ -470,7 +485,7 @@ open_shown (NautilusQuickLook *self)
     {
         nautilus_files_view_activate_selection (self->view, FALSE);
     }
-    gtk_window_close (GTK_WINDOW (self));
+    ql_hide (self);
 }
 
 static void
@@ -517,7 +532,7 @@ on_key_pressed (GtkEventControllerKey *controller,
     {
         case GDK_KEY_space:
         {
-            gtk_window_close (GTK_WINDOW (self));
+            ql_hide (self);
         }
         break;
 
@@ -528,13 +543,13 @@ on_key_pressed (GtkEventControllerKey *controller,
                 g_clear_object (&self->alone);
                 show_current (self);
             }
-            else if (gtk_window_is_fullscreen (GTK_WINDOW (self)))
+            else if (ql_is_fullscreen (self))
             {
-                gtk_window_unfullscreen (GTK_WINDOW (self));
+                ql_set_fullscreen (self, FALSE);
             }
             else
             {
-                gtk_window_close (GTK_WINDOW (self));
+                ql_hide (self);
             }
         }
         break;
@@ -549,14 +564,7 @@ on_key_pressed (GtkEventControllerKey *controller,
         case GDK_KEY_Tab:
         case GDK_KEY_F11:
         {
-            if (gtk_window_is_fullscreen (GTK_WINDOW (self)))
-            {
-                gtk_window_unfullscreen (GTK_WINDOW (self));
-            }
-            else
-            {
-                gtk_window_fullscreen (GTK_WINDOW (self));
-            }
+            ql_set_fullscreen (self, !ql_is_fullscreen (self));
         }
         break;
 
@@ -719,21 +727,129 @@ on_key_pressed (GtkEventControllerKey *controller,
     return GDK_EVENT_STOP;
 }
 
+/* ------------------------------------------------- Showing, hiding */
+
 static gboolean
-on_close_request (NautilusQuickLook *self)
+ql_is_fullscreen (NautilusQuickLook *self)
 {
+    return gtk_widget_has_css_class (GTK_WIDGET (self), "fullscreen");
+}
+
+static void
+ql_set_fullscreen (NautilusQuickLook *self,
+                   gboolean           fullscreen)
+{
+    GtkWindow *window = GTK_WINDOW (gtk_widget_get_root (GTK_WIDGET (self)));
+
+    if (fullscreen)
+    {
+        gtk_widget_add_css_class (GTK_WIDGET (self), "fullscreen");
+        if (window != NULL && !gtk_window_is_fullscreen (window))
+        {
+            self->made_fullscreen = TRUE;
+            gtk_window_fullscreen (window);
+        }
+    }
+    else
+    {
+        gtk_widget_remove_css_class (GTK_WIDGET (self), "fullscreen");
+        if (window != NULL && self->made_fullscreen)
+        {
+            gtk_window_unfullscreen (window);
+        }
+        self->made_fullscreen = FALSE;
+    }
+}
+
+static void
+set_opacity (double             value,
+             NautilusQuickLook *self)
+{
+    gtk_widget_set_opacity (GTK_WIDGET (self), value);
+}
+
+static void
+on_fade_done (NautilusQuickLook *self)
+{
+    if (self->shown)
+    {
+        return;
+    }
+
+    /* Let go of everything; the card stays, to come back quickly. */
+    gtk_widget_set_visible (GTK_WIDGET (self), FALSE);
     stop_media (self);
     nautilus_text_preview_set_file (self->text, NULL);
     watch_files (self, FALSE);
     g_clear_object (&self->alone);
     g_clear_list (&self->files, g_object_unref);
     nautilus_ql_canvas_set_files (self->canvas, NULL);
-    gtk_window_unfullscreen (GTK_WINDOW (self));
+}
 
-    /* Hidden, to be shown again quickly. */
-    gtk_widget_set_visible (GTK_WIDGET (self), FALSE);
+static void
+fade_to (NautilusQuickLook *self,
+         double             to,
+         guint              ms)
+{
+    adw_timed_animation_set_value_from (ADW_TIMED_ANIMATION (self->fade),
+                                        gtk_widget_get_opacity (GTK_WIDGET (self)));
+    adw_timed_animation_set_value_to (ADW_TIMED_ANIMATION (self->fade), to);
+    adw_timed_animation_set_duration (ADW_TIMED_ANIMATION (self->fade), ms);
+    adw_animation_play (self->fade);
+}
 
-    return TRUE;
+static void
+ql_show (NautilusQuickLook *self)
+{
+    if (!self->shown)
+    {
+        self->shown = TRUE;
+        if (!gtk_widget_get_visible (GTK_WIDGET (self)))
+        {
+            gtk_widget_set_opacity (GTK_WIDGET (self), 0);
+            gtk_widget_set_visible (GTK_WIDGET (self), TRUE);
+        }
+        fade_to (self, 1, FADE_IN_MS);
+    }
+    gtk_widget_grab_focus (GTK_WIDGET (self));
+}
+
+static void
+ql_hide (NautilusQuickLook *self)
+{
+    if (!self->shown)
+    {
+        return;
+    }
+
+    self->shown = FALSE;
+    stop_media (self);
+    if (ql_is_fullscreen (self))
+    {
+        ql_set_fullscreen (self, FALSE);
+    }
+    fade_to (self, 0, FADE_OUT_MS);
+
+    /* The keys go back to the files. */
+    if (self->view != NULL)
+    {
+        gtk_widget_grab_focus (GTK_WIDGET (self->view));
+    }
+}
+
+/* A click on the dimmed window around the card closes. */
+static void
+on_backdrop_pressed (GtkGestureClick   *gesture,
+                     int                n_press,
+                     double             x,
+                     double             y,
+                     NautilusQuickLook *self)
+{
+    if (gtk_widget_pick (GTK_WIDGET (self), x, y, GTK_PICK_DEFAULT) == GTK_WIDGET (self))
+    {
+        gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+        ql_hide (self);
+    }
 }
 
 /* --------------------------------------------------------- Building */
@@ -746,6 +862,16 @@ build_header (NautilusQuickLook *self)
 
     self->title = ADW_WINDOW_TITLE (adw_window_title_new ("", ""));
     adw_header_bar_set_title_widget (ADW_HEADER_BAR (header), GTK_WIDGET (self->title));
+    adw_header_bar_set_show_start_title_buttons (ADW_HEADER_BAR (header), FALSE);
+    adw_header_bar_set_show_end_title_buttons (ADW_HEADER_BAR (header), FALSE);
+
+    button = gtk_button_new_from_icon_name ("window-close-symbolic");
+    gtk_widget_add_css_class (button, "flat");
+    gtk_widget_add_css_class (button, "circular");
+    gtk_widget_set_tooltip_text (button, _("Close (Space)"));
+    gtk_widget_set_focus_on_click (button, FALSE);
+    g_signal_connect_swapped (button, "clicked", G_CALLBACK (ql_hide), self);
+    adw_header_bar_pack_end (ADW_HEADER_BAR (header), button);
 
     /* Stars of the item shown alone. */
     self->rating_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
@@ -863,9 +989,11 @@ nautilus_quick_look_init (NautilusQuickLook *self)
     GtkWidget *toolbar = adw_toolbar_view_new ();
     GtkEventController *keys;
 
-    gtk_window_set_default_size (GTK_WINDOW (self), 960, 680);
-    gtk_window_set_hide_on_close (GTK_WINDOW (self), FALSE);
+    GtkGesture *click;
+
     gtk_widget_add_css_class (GTK_WIDGET (self), "quick-look");
+    gtk_widget_set_focusable (GTK_WIDGET (self), TRUE);
+    gtk_widget_set_visible (GTK_WIDGET (self), FALSE);
 
     self->canvas = NAUTILUS_QL_CANVAS (nautilus_ql_canvas_new ());
     g_signal_connect (self->canvas, "item-activated", G_CALLBACK (on_item_activated), self);
@@ -884,14 +1012,26 @@ nautilus_quick_look_init (NautilusQuickLook *self)
     gtk_stack_add_named (self->stack, GTK_WIDGET (self->text), "text");
     gtk_stack_add_named (self->stack, build_info_page (self), "info");
     adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar), GTK_WIDGET (self->stack));
-    adw_window_set_content (ADW_WINDOW (self), toolbar);
+    self->card = toolbar;
+    gtk_widget_add_css_class (self->card, "quick-look-card");
+    gtk_widget_set_overflow (self->card, GTK_OVERFLOW_HIDDEN);
+    adw_bin_set_child (ADW_BIN (self), toolbar);
+
+    click = gtk_gesture_click_new ();
+    g_signal_connect (click, "pressed", G_CALLBACK (on_backdrop_pressed), self);
+    gtk_widget_add_controller (GTK_WIDGET (self), GTK_EVENT_CONTROLLER (click));
+
+    self->fade = adw_timed_animation_new (GTK_WIDGET (self), 0, 1, FADE_IN_MS,
+                                          adw_callback_animation_target_new ((AdwAnimationTargetFunc) set_opacity,
+                                                                             self, NULL));
+    adw_timed_animation_set_easing (ADW_TIMED_ANIMATION (self->fade), ADW_EASE_OUT_CUBIC);
+    g_signal_connect_swapped (self->fade, "done", G_CALLBACK (on_fade_done), self);
 
     keys = gtk_event_controller_key_new ();
     gtk_event_controller_set_propagation_phase (keys, GTK_PHASE_CAPTURE);
     g_signal_connect (keys, "key-pressed", G_CALLBACK (on_key_pressed), self);
     gtk_widget_add_controller (GTK_WIDGET (self), keys);
 
-    g_signal_connect (self, "close-request", G_CALLBACK (on_close_request), NULL);
     g_signal_connect_object (nautilus_flier_settings (), "changed::ratings",
                              G_CALLBACK (update_rating), self, G_CONNECT_SWAPPED);
 }
@@ -906,6 +1046,7 @@ nautilus_quick_look_dispose (GObject *object)
     g_clear_object (&self->alone);
     g_clear_list (&self->files, g_object_unref);
     g_clear_weak_pointer (&self->view);
+    g_clear_object (&self->fade);
 
     G_OBJECT_CLASS (nautilus_quick_look_parent_class)->dispose (object);
 }
@@ -927,16 +1068,37 @@ nautilus_quick_look_enabled (void)
 gboolean
 nautilus_quick_look_is_visible (void)
 {
-    return quick_look != NULL && gtk_widget_get_visible (GTK_WIDGET (quick_look));
+    return quick_look != NULL && quick_look->shown;
+}
+
+gboolean
+nautilus_quick_look_has_keys (GtkWindow *window)
+{
+    return nautilus_quick_look_is_visible () &&
+           gtk_widget_get_root (GTK_WIDGET (quick_look)) == GTK_ROOT (window);
 }
 
 void
 nautilus_quick_look_close (void)
 {
-    if (nautilus_quick_look_is_visible ())
+    if (quick_look != NULL)
     {
-        gtk_window_close (GTK_WINDOW (quick_look));
+        ql_hide (quick_look);
     }
+}
+
+void
+nautilus_quick_look_attach (AdwApplicationWindow *window)
+{
+    GtkWidget *content = adw_application_window_get_content (window);
+    GtkWidget *overlay = gtk_overlay_new ();
+
+    g_object_ref (content);
+    adw_application_window_set_content (window, overlay);
+    gtk_overlay_set_child (GTK_OVERLAY (overlay), content);
+    g_object_unref (content);
+
+    g_object_set_data (G_OBJECT (window), "quick-look-overlay", overlay);
 }
 
 void
@@ -944,6 +1106,7 @@ nautilus_quick_look_toggle (NautilusFilesView *view,
                             GList             *selection)
 {
     GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (view));
+    GtkWidget *overlay = root != NULL ? g_object_get_data (G_OBJECT (root), "quick-look-overlay") : NULL;
 
     if (nautilus_quick_look_is_visible ())
     {
@@ -951,7 +1114,7 @@ nautilus_quick_look_toggle (NautilusFilesView *view,
         return;
     }
 
-    if (selection == NULL || !GTK_IS_WINDOW (root))
+    if (selection == NULL || overlay == NULL)
     {
         return;
     }
@@ -963,12 +1126,25 @@ nautilus_quick_look_toggle (NautilusFilesView *view,
     }
 
     /* Over the window it was opened from, going away with it. */
-    gtk_window_set_transient_for (GTK_WINDOW (quick_look), GTK_WINDOW (root));
-    gtk_window_set_destroy_with_parent (GTK_WINDOW (quick_look), TRUE);
+    if (gtk_widget_get_parent (GTK_WIDGET (quick_look)) != overlay)
+    {
+        if (gtk_widget_get_parent (GTK_WIDGET (quick_look)) != NULL)
+        {
+            g_object_ref (quick_look);
+            gtk_overlay_remove_overlay (GTK_OVERLAY (gtk_widget_get_parent (GTK_WIDGET (quick_look))),
+                                        GTK_WIDGET (quick_look));
+            gtk_overlay_add_overlay (GTK_OVERLAY (overlay), GTK_WIDGET (quick_look));
+            g_object_unref (quick_look);
+        }
+        else
+        {
+            gtk_overlay_add_overlay (GTK_OVERLAY (overlay), GTK_WIDGET (quick_look));
+        }
+    }
     g_set_weak_pointer (&quick_look->view, view);
 
     set_files (quick_look, selection);
-    gtk_window_present (GTK_WINDOW (quick_look));
+    ql_show (quick_look);
 }
 
 void
