@@ -1601,7 +1601,6 @@ static void
 nautilus_window_initialize_actions (NautilusWindow *window)
 {
     GApplication *app;
-    GAction *action;
     gchar detailed_action[80];
     gchar accel[80];
     gint i;
@@ -1641,9 +1640,7 @@ nautilus_window_initialize_actions (NautilusWindow *window)
 
 #undef ACCELS
 
-    action = g_action_map_lookup_action (G_ACTION_MAP (window), "toggle-sidebar");
-    g_object_bind_property (window->split_view, "collapsed",
-                            action, "enabled", G_BINDING_SYNC_CREATE);
+    /* The sidebar can be hidden at any width, not only when it overlays. */
 }
 
 static gboolean
