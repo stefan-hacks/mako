@@ -206,8 +206,8 @@ Mako is used daily, but it is young. All changes are on the
 `nautilus-labels.c`, `nautilus-inspector.c`, `nautilus-bottom-bar.c` and
 `nautilus-tile-layout.c`), which keeps following upstream easy.
 
-Many ideas come from [File Flier](https://github.com/andrew11155/FileFlier),
-a file manager written in Rust.
+Many ideas come from [File pilot]([https://github.com/andrew11155/FileFlier](https://filepilot.tech)),
+a file manager developed for windows - go support the project
 
 The README pictures were taken from inside the app (run with
 `FLIER_CAPTURE=1`) in a demo home folder.
