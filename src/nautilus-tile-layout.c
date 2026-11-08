@@ -35,6 +35,9 @@ nautilus_tile_init (NautilusTile *self)
     self->view = ADW_TAB_VIEW (adw_tab_view_new ());
     self->bar = ADW_TAB_BAR (adw_tab_bar_new ());
     adw_tab_bar_set_view (self->bar, self->view);
+    /* Tabs at their own width (libadwaita caps it), from the left, rather
+     * than stretched over the whole bar. */
+    adw_tab_bar_set_expand_tabs (self->bar, FALSE);
     gtk_widget_set_vexpand (GTK_WIDGET (self->view), TRUE);
 
     gtk_box_append (GTK_BOX (self), GTK_WIDGET (self->bar));

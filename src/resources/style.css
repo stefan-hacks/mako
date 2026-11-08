@@ -402,14 +402,19 @@ nautilus-tile > tabbar .box:backdrop {
 /* The tab in use: filled with the accent color. Selected tabs of the other
  * tiles stay neutral, so the colored one is where you are. */
 tabbar tab:selected {
-  background-color: color-mix(in srgb, var(--accent-bg-color) 30%, transparent);
+  background-color: var(--accent-bg-color);
+  color: var(--accent-fg-color);
 }
 tabbar tab:selected:backdrop {
-  background-color: color-mix(in srgb, var(--accent-bg-color) 18%, transparent);
+  background-color: color-mix(in srgb, var(--accent-bg-color) 75%, transparent);
 }
+tabbar tab:selected button.tab-close-button,
+tabbar tab:selected .tab-indicator { color: var(--accent-fg-color); }
 nautilus-tile-layout.split nautilus-tile:not(.active-tile) tabbar tab:selected {
-  background-color: color-mix(in srgb, currentColor 8%, transparent);
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
+  color: inherit;
 }
+nautilus-tile-layout.split nautilus-tile:not(.active-tile) tabbar tab:selected button.tab-close-button { color: inherit; }
 
 /* Quick Look */
 .quick-look .star.rated { color: #f5c211; }
