@@ -275,6 +275,19 @@
         <attribute name="hidden-when">action-disabled</attribute>
       </item>
     </section>
+    <section id="marks-section">
+      <item>
+        <attribute name="custom">rating-row</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">_Tags…</attribute>
+        <attribute name="action">view.edit-tags</attribute>
+        <attribute name="hidden-when">action-disabled</attribute>
+      </item>
+      <item>
+        <attribute name="custom">folder-color-row</attribute>
+      </item>
+    </section>
     <section id="selection-extensions-section"/>
     <section>
       <item>

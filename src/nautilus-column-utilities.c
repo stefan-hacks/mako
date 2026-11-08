@@ -43,6 +43,8 @@ static const char *default_column_order[] =
     "date_accessed",
     "date_created",
     "recency",
+    "rating",
+    "tags",
     "starred",
     NULL
 };
@@ -150,6 +152,23 @@ get_builtin_columns (void)
                                            "description", _("The date the file was accessed by the user."),
                                            "default-sort-order", GTK_SORT_DESCENDING,
                                            "xalign", 1.0,
+                                           NULL));
+
+    columns = g_list_append (columns,
+                             g_object_new (NAUTILUS_TYPE_COLUMN,
+                                           "name", "rating",
+                                           "attribute", "rating",
+                                           "label", _("Rating"),
+                                           "description", _("The star rating of the file."),
+                                           "default-sort-order", GTK_SORT_DESCENDING,
+                                           NULL));
+
+    columns = g_list_append (columns,
+                             g_object_new (NAUTILUS_TYPE_COLUMN,
+                                           "name", "tags",
+                                           "attribute", "tags",
+                                           "label", _("Tags"),
+                                           "description", _("The tags of the file."),
                                            NULL));
 
     columns = g_list_append (columns,

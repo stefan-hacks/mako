@@ -334,6 +334,15 @@ gboolean                nautilus_file_rename_handle_file_gone           (Nautilu
  */
 gboolean                nautilus_file_is_not_yet_confirmed              (NautilusFile                   *file);
 
+/* Ratings (0-5 stars) and tags. Change them with nautilus-labels.h. */
+guint                   nautilus_file_get_rating                        (NautilusFile                   *file);
+const char * const *    nautilus_file_get_tags                          (NautilusFile                   *file);
+gboolean                nautilus_file_has_tag                           (NautilusFile                   *file,
+									 const char                     *tag);
+void                    nautilus_file_set_marks_cached                  (NautilusFile                   *file,
+									 guint                           rating,
+									 const char * const             *tags);
+
 /* Simple getting and setting top-level metadata. */
 const char *            nautilus_file_get_metadata                      (NautilusFile                   *file,
 									 const char                     *key,

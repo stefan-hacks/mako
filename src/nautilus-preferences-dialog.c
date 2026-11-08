@@ -25,6 +25,8 @@
 
 #include "nautilus-preferences-dialog.h"
 
+#include "nautilus-labels-ui.h"
+
 #include <adwaita.h>
 #include <glib/gi18n.h>
 #include <nautilus-extension.h>
@@ -233,6 +235,9 @@ nautilus_preferences_dialog_show (GtkWidget *parent)
     gtk_widget_insert_action_group (GTK_WIDGET (preferences_dialog),
                                     "preferences",
                                     G_ACTION_GROUP (action_group));
+
+    adw_preferences_dialog_add (preferences_dialog,
+                                ADW_PREFERENCES_PAGE (nautilus_labels_preferences_page_new ()));
 
     adw_dialog_present (ADW_DIALOG (preferences_dialog), parent);
 }

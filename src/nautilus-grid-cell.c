@@ -10,6 +10,7 @@
 #include "nautilus-global-preferences.h"
 #include "nautilus-icon-info.h"
 #include "nautilus-image.h"
+#include "nautilus-labels.h"
 #include "nautilus-tag-manager.h"
 #include "nautilus-thumbnails.h"
 #include "nautilus-ui-utilities.h"
@@ -32,6 +33,7 @@ struct _NautilusGridCell
     GtkWidget *third_caption;
 
     gboolean in_file_change;
+    gboolean hovered;
 };
 
 G_DEFINE_TYPE (NautilusGridCell, nautilus_grid_cell, NAUTILUS_TYPE_VIEW_CELL)
@@ -249,6 +251,189 @@ nautilus_grid_cell_dispose (GObject *object)
 #define EMBLEMS_BOX_WIDTH 18
 #define VERTICAL_PADDING 6
 
+/* ------------------------------------------ Ratings and tags on tiles
+ *
+ * Drawn, not widgets, so big folders stay fast. Rated tiles show their
+ * stars; holding Alt over any tile shows them too, to click one. Tags are
+ * dots in the picture's top corner.
+ */
+
+static gboolean
+stars_bounds (NautilusGridCell *self,
+              graphene_rect_t  *bounds)
+{
+    guint icon_size;
+    int width = gtk_widget_get_width (GTK_WIDGET (self));
+
+    g_object_get (self, "icon-size", &icon_size, NULL);
+
+    float star = CLAMP (icon_size / 8.0f, 11.0f, 18.0f);
+
+    if (icon_size < 48)
+    {
+        return FALSE;
+    }
+
+    *bounds = GRAPHENE_RECT_INIT ((width - 5 * star) / 2.0f, icon_size - star - 4,
+                                  5 * star, star);
+    return TRUE;
+}
+
+static NautilusFile *
+cell_file (NautilusGridCell *self)
+{
+    g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
+
+    return item != NULL ? nautilus_view_item_get_file (item) : NULL;
+}
+
+/* Whether the stars are showing, and so clickable. */
+static gboolean
+stars_active (NautilusGridCell *self,
+              NautilusFile     *file)
+{
+    GSettings *flier = nautilus_flier_settings ();
+
+    if (file == NULL || !g_settings_get_boolean (flier, "ratings"))
+    {
+        return FALSE;
+    }
+
+    if (self->hovered && nautilus_labels_get_alt_held ())
+    {
+        return TRUE;
+    }
+
+    return nautilus_file_get_rating (file) > 0 && g_settings_get_boolean (flier, "marks-on-tiles");
+}
+
+static void
+snapshot_marks (NautilusGridCell *self,
+                GtkSnapshot      *snapshot)
+{
+    NautilusFile *file = cell_file (self);
+    GSettings *flier = nautilus_flier_settings ();
+    graphene_rect_t stars;
+
+    if (file == NULL)
+    {
+        return;
+    }
+
+    if (stars_active (self, file) && stars_bounds (self, &stars))
+    {
+        GskRoundedRect pill;
+        graphene_rect_t back;
+        GdkRGBA fg, bg = { 0, 0, 0, 0.55f };
+
+        gtk_widget_get_color (GTK_WIDGET (self), &fg);
+        graphene_rect_inset_r (&stars, -4, -2, &back);
+        gsk_rounded_rect_init_from_rect (&pill, &back, back.size.height / 2);
+        gtk_snapshot_push_rounded_clip (snapshot, &pill);
+        gtk_snapshot_append_color (snapshot, &bg, &back);
+        gtk_snapshot_pop (snapshot);
+
+        nautilus_labels_draw_stars (snapshot, &stars, nautilus_file_get_rating (file),
+                                    &(GdkRGBA){ 1, 1, 1, 0.75f },
+                                    gtk_widget_get_scale_factor (GTK_WIDGET (self)));
+    }
+
+    const char * const *tags = nautilus_file_get_tags (file);
+
+    if (tags != NULL && g_settings_get_boolean (flier, "tags") &&
+        g_settings_get_boolean (flier, "marks-on-tiles"))
+    {
+        guint icon_size;
+
+        g_object_get (self, "icon-size", &icon_size, NULL);
+
+        float dot = CLAMP (icon_size / 12.0f, 7.0f, 12.0f);
+        float x = EMBLEMS_BOX_WIDTH + 4;
+
+        for (guint i = 0; tags[i] != NULL && i < 6; i++, x += dot * 0.75f)
+        {
+            GdkRGBA color;
+            GskRoundedRect circle;
+            graphene_rect_t r = GRAPHENE_RECT_INIT (x, 4, dot, dot);
+            const GdkRGBA ring = { 1, 1, 1, 0.9f };
+
+            nautilus_labels_get_tag_color (tags[i], &color);
+            gsk_rounded_rect_init_from_rect (&circle, &r, dot / 2);
+            gtk_snapshot_push_rounded_clip (snapshot, &circle);
+            gtk_snapshot_append_color (snapshot, &color, &r);
+            gtk_snapshot_pop (snapshot);
+            gtk_snapshot_append_border (snapshot, &circle,
+                                        (float[4]) { 1, 1, 1, 1 },
+                                        (GdkRGBA[4]) { ring, ring, ring, ring });
+        }
+    }
+}
+
+static void
+on_marks_pressed (GtkGestureClick  *gesture,
+                  int               n_press,
+                  double            x,
+                  double            y,
+                  NautilusGridCell *self)
+{
+    NautilusFile *file = cell_file (self);
+    graphene_rect_t stars;
+    guint star;
+
+    if (n_press != 1 || !stars_active (self, file) || !stars_bounds (self, &stars) ||
+        y < stars.origin.y - 2 || y > stars.origin.y + stars.size.height + 2 ||
+        (star = nautilus_labels_star_at (&stars, x)) == 0)
+    {
+        gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_DENIED);
+        return;
+    }
+
+    /* Clicking the current rating clears it. */
+    if (star == nautilus_file_get_rating (file))
+    {
+        star = 0;
+    }
+
+    gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    nautilus_labels_set_rating (&(GList){ .data = file }, star);
+}
+
+static void
+on_hover_changed (NautilusGridCell *self,
+                  gboolean          hovered)
+{
+    self->hovered = hovered;
+    if (nautilus_labels_get_alt_held ())
+    {
+        gtk_widget_queue_draw (GTK_WIDGET (self));
+    }
+}
+
+static void
+on_pointer_enter (GtkEventControllerMotion *motion,
+                  double                    x,
+                  double                    y,
+                  NautilusGridCell         *self)
+{
+    on_hover_changed (self, TRUE);
+}
+
+static void
+on_pointer_leave (GtkEventControllerMotion *motion,
+                  NautilusGridCell         *self)
+{
+    on_hover_changed (self, FALSE);
+}
+
+static void
+on_alt_held_changed (NautilusGridCell *self)
+{
+    if (self->hovered)
+    {
+        gtk_widget_queue_draw (GTK_WIDGET (self));
+    }
+}
+
 static void
 nautilus_grid_cell_measure (GtkWidget      *widget,
                             GtkOrientation  orientation,
@@ -427,6 +612,8 @@ snapshot (GtkWidget   *widget,
     }
 
     GTK_WIDGET_CLASS (nautilus_grid_cell_parent_class)->snapshot (widget, snapshot);
+
+    snapshot_marks (self, snapshot);
 }
 
 static void
@@ -473,6 +660,25 @@ nautilus_grid_cell_init (NautilusGridCell *self)
     g_signal_connect_object (nautilus_preferences, "changed::" NAUTILUS_PREFERENCES_DATE_TIME_FORMAT,
                              G_CALLBACK (update_captions), self,
                              G_CONNECT_SWAPPED);
+
+    /* Ratings and tags drawn on the tile. */
+    GtkEventController *motion = gtk_event_controller_motion_new ();
+    GtkGesture *click = gtk_gesture_click_new ();
+
+    g_signal_connect (motion, "enter", G_CALLBACK (on_pointer_enter), self);
+    g_signal_connect (motion, "leave", G_CALLBACK (on_pointer_leave), self);
+    gtk_widget_add_controller (GTK_WIDGET (self), motion);
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), GDK_BUTTON_PRIMARY);
+    gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click), GTK_PHASE_CAPTURE);
+    g_signal_connect (click, "pressed", G_CALLBACK (on_marks_pressed), self);
+    gtk_widget_add_controller (GTK_WIDGET (self), GTK_EVENT_CONTROLLER (click));
+
+    g_signal_connect_object (nautilus_labels_get (), "notify::alt-held",
+                             G_CALLBACK (on_alt_held_changed), self, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_labels_get (), "tags-changed",
+                             G_CALLBACK (gtk_widget_queue_draw), self, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_flier_settings (), "changed",
+                             G_CALLBACK (gtk_widget_queue_draw), self, G_CONNECT_SWAPPED);
 
     /* Connect automatically to an item. */
     self->item_signal_group = g_signal_group_new (NAUTILUS_TYPE_VIEW_ITEM);

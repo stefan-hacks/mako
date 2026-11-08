@@ -271,7 +271,22 @@ on_item_click_pressed (GtkGestureClick *gesture,
 
     /* It's safe to claim event sequence on press in the following cases because
      * they don't interfere with touch scrolling. */
-    if (button == GDK_BUTTON_PRIMARY && n_press == 2 && !priv->single_click_mode)
+    if (button == GDK_BUTTON_PRIMARY && n_press == 2 && (modifiers & GDK_ALT_MASK))
+    {
+        /* Alt+double-click: Properties of the item. */
+        select_single_item_if_not_selected (self, cell);
+        gtk_widget_activate_action (GTK_WIDGET (self), "view.properties", NULL);
+        gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    }
+    else if (button == GDK_BUTTON_PRIMARY && n_press == 2 &&
+             (modifiers & (GDK_CONTROL_MASK | GDK_SHIFT_MASK)) == GDK_CONTROL_MASK)
+    {
+        /* Ctrl+double-click: open in a new tab, like a middle click. */
+        select_single_item_if_not_selected (self, cell);
+        nautilus_list_base_activate_selection (self, TRUE);
+        gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    }
+    else if (button == GDK_BUTTON_PRIMARY && n_press == 2 && !priv->single_click_mode)
     {
         /* If Ctrl + Shift are held, we don't want to activate selection. But
          * we still need to claim the event, otherwise GtkListBase's default

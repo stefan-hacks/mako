@@ -42,4 +42,9 @@
 #define NAUTILUS_METADATA_KEY_CUSTOM_ICON_NAME                	"custom-icon-name"
 #define NAUTILUS_METADATA_KEY_EMBLEMS				"emblems"
 
+/* Folder color slot, 0-7 (see nautilus-labels.h) */
+#define NAUTILUS_METADATA_KEY_FOLDER_COLOR			"nautilus-folder-color"
+/* How a folder groups its items: "none", "date" or "name" */
+#define NAUTILUS_METADATA_KEY_GROUP_BY				"nautilus-group-by"
+
 guint nautilus_metadata_get_id (const char *metadata);

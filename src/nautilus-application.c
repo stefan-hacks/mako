@@ -64,6 +64,7 @@
 #include "nautilus-shell-search-provider.h"
 #include "nautilus-signaller.h"
 #include "nautilus-tag-manager.h"
+#include "nautilus-labels.h"
 #include "nautilus-localsearch-utilities.h"
 #include "nautilus-trash-monitor.h"
 #include "nautilus-ui-utilities.h"
@@ -1008,6 +1009,7 @@ nautilus_application_startup (GApplication *app)
     check_required_directories (self);
 
     nautilus_init_application_actions (self);
+    nautilus_labels_import_file_flier ();
 
     if (!g_test_initialized ())
     {

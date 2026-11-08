@@ -55,6 +55,7 @@
 #include "nautilus-filename-utilities.h"
 #include "nautilus-global-preferences.h"
 #include "nautilus-icon-info.h"
+#include "nautilus-labels.h"
 #include "nautilus-metadata.h"
 #include "nautilus-mime-actions.h"
 #include "nautilus-module.h"
@@ -163,7 +164,9 @@ static GQuark attribute_name_q,
               attribute_link_target_q,
               attribute_volume_q,
               attribute_free_space_q,
-              attribute_starred_q;
+              attribute_starred_q,
+              attribute_rating_q,
+              attribute_tags_q;
 
 static void     nautilus_file_info_iface_init (NautilusFileInfoInterface *iface);
 static char *nautilus_file_get_owner_as_string (NautilusFile *file,
@@ -928,6 +931,7 @@ finalize (GObject *object)
 
     g_clear_pointer (&file->details->filesystem_id, g_ref_string_release);
     g_free (file->details->trash_orig_path);
+    g_clear_pointer (&file->details->tags, g_strfreev);
 
     g_list_free_full (file->details->pending_extension_emblems, g_free);
     g_list_free_full (file->details->extension_emblems, g_free);
@@ -2423,6 +2427,167 @@ update_links_if_target (NautilusFile *target_file)
     nautilus_file_list_free (link_files);
 }
 
+/* GIO hands xattr values over escaped: bytes outside printable ASCII, and
+ * the backslash itself, as \\xNN. */
+static char *
+unescape_xattr (const char *value)
+{
+    GString *out = g_string_sized_new (strlen (value));
+
+    for (const char *p = value; *p != '\0'; p++)
+    {
+        if (p[0] == '\\' && p[1] == 'x' &&
+            g_ascii_isxdigit (p[2]) && g_ascii_isxdigit (p[3]))
+        {
+            g_string_append_c (out, (char) (g_ascii_xdigit_value (p[2]) * 16 + g_ascii_xdigit_value (p[3])));
+            p += 3;
+        }
+        else
+        {
+            g_string_append_c (out, *p);
+        }
+    }
+
+    return g_string_free (out, FALSE);
+}
+
+static GStrv
+split_tags (const char *value)
+{
+    g_autoptr (GStrvBuilder) builder = g_strv_builder_new ();
+    g_auto (GStrv) parts = g_strsplit (value, ",", -1);
+    gboolean any = FALSE;
+
+    for (int i = 0; parts[i] != NULL; i++)
+    {
+        g_strstrip (parts[i]);
+        if (parts[i][0] != '\0' && g_utf8_validate (parts[i], -1, NULL))
+        {
+            g_strv_builder_add (builder, parts[i]);
+            any = TRUE;
+        }
+    }
+
+    return any ? g_strv_builder_end (builder) : NULL;
+}
+
+static gboolean
+strv_equal0 (const char * const *a,
+             const char * const *b)
+{
+    if (a == NULL || b == NULL)
+    {
+        return a == b;
+    }
+
+    return g_strv_equal (a, b);
+}
+
+static gboolean
+update_marks_from_info (NautilusFile *file,
+                        GFileInfo    *info)
+{
+    gboolean changed = FALSE;
+    guint8 rating = 0;
+    g_auto (GStrv) tags = NULL;
+
+    /* Remote files don't have these; keep what we know then. */
+    if (!g_file_info_has_namespace (info, "xattr") &&
+        !g_file_info_has_attribute (info, "xattr::baloo.rating") &&
+        !g_file_info_has_attribute (info, "xattr::xdg.tags"))
+    {
+        if (file->details->rating == 0 && file->details->tags == NULL)
+        {
+            return FALSE;
+        }
+    }
+
+    const char *raw_rating = g_file_info_get_attribute_string (info, "xattr::baloo.rating");
+    if (raw_rating != NULL)
+    {
+        /* Baloo stores 0-10, two per star. */
+        guint64 value = g_ascii_strtoull (raw_rating, NULL, 10);
+        rating = (guint8) MIN ((value + 1) / 2, 5);
+    }
+
+    const char *raw_tags = g_file_info_get_attribute_string (info, "xattr::xdg.tags");
+    if (raw_tags != NULL && raw_tags[0] != '\0')
+    {
+        g_autofree char *unescaped = unescape_xattr (raw_tags);
+        tags = split_tags (unescaped);
+    }
+
+    if (file->details->rating != rating)
+    {
+        file->details->rating = rating;
+        changed = TRUE;
+    }
+
+    if (!strv_equal0 ((const char * const *) file->details->tags, (const char * const *) tags))
+    {
+        g_strfreev (file->details->tags);
+        file->details->tags = g_steal_pointer (&tags);
+        changed = TRUE;
+    }
+
+    return changed;
+}
+
+guint
+nautilus_file_get_rating (NautilusFile *file)
+{
+    g_return_val_if_fail (NAUTILUS_IS_FILE (file), 0);
+
+    return file->details->rating;
+}
+
+const char * const *
+nautilus_file_get_tags (NautilusFile *file)
+{
+    g_return_val_if_fail (NAUTILUS_IS_FILE (file), NULL);
+
+    return (const char * const *) file->details->tags;
+}
+
+gboolean
+nautilus_file_has_tag (NautilusFile *file,
+                       const char   *tag)
+{
+    g_return_val_if_fail (NAUTILUS_IS_FILE (file), FALSE);
+
+    return file->details->tags != NULL &&
+           g_strv_contains ((const char * const *) file->details->tags, tag);
+}
+
+/* Shows a rating or tag change right away; the write to disk follows. */
+void
+nautilus_file_set_marks_cached (NautilusFile       *file,
+                                guint               rating,
+                                const char * const *tags)
+{
+    g_return_if_fail (NAUTILUS_IS_FILE (file));
+
+    gboolean changed = FALSE;
+
+    if (file->details->rating != MIN (rating, 5))
+    {
+        file->details->rating = MIN (rating, 5);
+        changed = TRUE;
+    }
+
+    if (!strv_equal0 ((const char * const *) file->details->tags, tags))
+    {
+        g_strfreev (file->details->tags);
+        file->details->tags = (tags != NULL && tags[0] != NULL) ? g_strdupv ((char **) tags) : NULL;
+        changed = TRUE;
+    }
+
+    if (changed)
+    {
+        nautilus_file_changed (file);
+    }
+}
+
 static gboolean
 update_info_internal (NautilusFile *file,
                       GFileInfo    *info,
@@ -2863,6 +3028,8 @@ update_info_internal (NautilusFile *file,
     {
         changed = TRUE;
     }
+
+    changed |= update_marks_from_info (file, info);
 
     if (g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_PREVIEW_ICON))
     {
@@ -3914,6 +4081,53 @@ nautilus_file_compare_for_sort_by_attribute_q   (NautilusFile *file_1,
                                                directories_first,
                                                reversed);
     }
+    else if (attribute == attribute_rating_q)
+    {
+        result = nautilus_file_compare_for_sort_internal (file_1, file_2, directories_first, reversed);
+        if (result == 0)
+        {
+            result = (int) file_1->details->rating - (int) file_2->details->rating;
+            if (reversed)
+            {
+                result = -result;
+            }
+        }
+        if (result == 0)
+        {
+            /* Same rating: by name, A-Z whichever way the ratings go. */
+            result = nautilus_file_compare_for_sort (file_1, file_2,
+                                                     NAUTILUS_FILE_SORT_BY_DISPLAY_NAME,
+                                                     directories_first, FALSE);
+        }
+        return result;
+    }
+    else if (attribute == attribute_tags_q)
+    {
+        result = nautilus_file_compare_for_sort_internal (file_1, file_2, directories_first, reversed);
+        if (result == 0)
+        {
+            g_autofree char *tags_1 = file_1->details->tags != NULL ? g_strjoinv (",", file_1->details->tags) : NULL;
+            g_autofree char *tags_2 = file_2->details->tags != NULL ? g_strjoinv (",", file_2->details->tags) : NULL;
+
+            /* Untagged last, whichever way. */
+            if ((tags_1 == NULL) != (tags_2 == NULL))
+            {
+                return tags_1 == NULL ? 1 : -1;
+            }
+            result = g_strcmp0 (tags_1, tags_2);
+            if (reversed)
+            {
+                result = -result;
+            }
+        }
+        if (result == 0)
+        {
+            result = nautilus_file_compare_for_sort (file_1, file_2,
+                                                     NAUTILUS_FILE_SORT_BY_DISPLAY_NAME,
+                                                     directories_first, FALSE);
+        }
+        return result;
+    }
 
     /* it is a normal attribute, compare by strings */
 
@@ -4951,7 +5165,23 @@ nautilus_file_get_icon_paintable (NautilusFile          *file,
 
     info = nautilus_file_get_icon (file, size, scale, flags);
 
-    return nautilus_icon_info_get_paintable (info);
+    GdkPaintable *paintable = nautilus_icon_info_get_paintable (info);
+
+    /* Colored folders: tint the theme's folder icon. */
+    if (paintable != NULL && file->details->type == G_FILE_TYPE_DIRECTORY)
+    {
+        int slot = nautilus_labels_get_folder_color (file);
+
+        if (slot >= 0)
+        {
+            GdkPaintable *tinted = nautilus_labels_tint_paintable (paintable, slot);
+
+            g_object_unref (paintable);
+            paintable = tinted;
+        }
+    }
+
+    return paintable;
 }
 
 GDateTime *
@@ -6853,6 +7083,10 @@ nautilus_file_get_string_attribute_with_default_q (NautilusFile *file,
         /* If n/a */
         return g_strdup ("");
     }
+    if (attribute_q == attribute_rating_q || attribute_q == attribute_tags_q)
+    {
+        return g_strdup ("");
+    }
     if (attribute_q == attribute_date_created_full_q)
     {
         /* If n/a */
@@ -8748,6 +8982,8 @@ nautilus_file_class_init (NautilusFileClass *class)
     attribute_volume_q = g_quark_from_static_string ("volume");
     attribute_free_space_q = g_quark_from_static_string ("free_space");
     attribute_starred_q = g_quark_from_static_string ("starred");
+    attribute_rating_q = g_quark_from_static_string ("rating");
+    attribute_tags_q = g_quark_from_static_string ("tags");
 
     G_OBJECT_CLASS (class)->dispose = nautilus_file_dispose;
     G_OBJECT_CLASS (class)->finalize = finalize;

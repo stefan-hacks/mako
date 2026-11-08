@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <enum id="org.gnome.nautilus.flier.FolderColorScheme">
+    <value value="0" nick="pastel"/>
+    <value value="1" nick="vibrant"/>
+    <value value="2" nick="earth"/>
+    <value value="3" nick="ocean"/>
+    <value value="4" nick="mono"/>
+  </enum>
+
+  <enum id="org.gnome.nautilus.flier.InspectorSide">
+    <value value="0" nick="right"/>
+    <value value="1" nick="left"/>
+    <value value="2" nick="bottom"/>
+  </enum>
+
+  <!-- Settings for the features carried over from File Flier. Kept apart from
+       org.gnome.nautilus.preferences so that schema stays as upstream has it. -->
+  <schema path="/org/gnome/nautilus/flier/" id="org.gnome.nautilus.flier" gettext-domain="nautilus">
+    <key name="folder-color-scheme" enum="org.gnome.nautilus.flier.FolderColorScheme">
+      <default>'pastel'</default>
+      <summary>Folder color scheme</summary>
+      <description>The colors that folders given a color are drawn in. Each folder keeps its slot, so changing the scheme recolors every colored folder.</description>
+    </key>
+    <key type="b" name="marks-on-tiles">
+      <default>true</default>
+      <summary>Show ratings and tags on grid tiles</summary>
+      <description>Draw the stars of rated files and the dots of tagged files on their icons in the grid view.</description>
+    </key>
+    <key type="b" name="ratings">
+      <default>true</default>
+      <summary>Ratings</summary>
+      <description>Offer star ratings in menus, columns, the grid and Quick Look.</description>
+    </key>
+    <key type="b" name="tags">
+      <default>true</default>
+      <summary>Tags</summary>
+      <description>Offer tags in menus, columns, the grid and Quick Look.</description>
+    </key>
+    <key type="b" name="folder-colors">
+      <default>true</default>
+      <summary>Folder colors</summary>
+      <description>Offer folder colors in the context menu and draw colored folders.</description>
+    </key>
+    <key type="b" name="own-quick-look">
+      <default>true</default>
+      <summary>Built-in Quick Look</summary>
+      <description>Preview with the built-in Quick Look window instead of the external previewer (Sushi).</description>
+    </key>
+    <key type="b" name="quick-look-names">
+      <default>true</default>
+      <summary>Names on the Quick Look canvas</summary>
+      <description>Show file names under the items when several files are previewed at once.</description>
+    </key>
+    <key type="b" name="quick-look-marks">
+      <default>true</default>
+      <summary>Ratings and tags on the Quick Look canvas</summary>
+      <description>Show stars and tag dots on the items when several files are previewed at once.</description>
+    </key>
+    <key type="b" name="inspector-visible">
+      <default>false</default>
+      <summary>Show the inspector</summary>
+      <description>Show a panel with a preview and the details of the selected item.</description>
+    </key>
+    <key name="inspector-side" enum="org.gnome.nautilus.flier.InspectorSide">
+      <default>'right'</default>
+      <summary>Inspector side</summary>
+      <description>Which side of the window the inspector is docked to.</description>
+    </key>
+    <key type="i" name="inspector-size">
+      <default>320</default>
+      <summary>Inspector size</summary>
+      <description>The width (or height, at the bottom) of the inspector in pixels.</description>
+    </key>
+    <key type="a{sas}" name="custom-shortcuts">
+      <default>{}</default>
+      <summary>Changed keyboard shortcuts</summary>
+      <description>Actions whose shortcuts were changed in the shortcuts overview (F1), with their keys. Actions not listed use their defaults.</description>
+    </key>
+    <key type="b" name="file-flier-imported">
+      <default>false</default>
+      <summary>File Flier settings imported</summary>
+      <description>Whether the folder colors and tags of File Flier were brought over once.</description>
+    </key>
+  </schema>
+</schemalist>

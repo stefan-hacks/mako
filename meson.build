@@ -116,6 +116,7 @@ libadwaita = dependency('libadwaita-1', version: '>= 1.8.alpha')
 libportal = dependency('libportal', version: '>= 0.7')
 libportal_gtk4 = dependency('libportal-gtk4', version: '>= 0.5')
 tinysparql = dependency('tinysparql-3.0', version: '>= 3.8')
+json_glib = dependency('json-glib-1.0', version: '>= 1.6')
 icu_dep = dependency('icu-uc', version: '>=56')
 icu_i18n_dep = dependency('icu-i18n', version: '>=56')
 

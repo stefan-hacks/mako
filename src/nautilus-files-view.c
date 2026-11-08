@@ -49,6 +49,8 @@
 #include "nautilus-error-reporting.h"
 #include "nautilus-file-operations.h"
 #include "nautilus-file-utilities.h"
+#include "nautilus-labels.h"
+#include "nautilus-labels-ui.h"
 #include "nautilus-file.h"
 #include "nautilus-filename-utilities.h"
 #include "nautilus-floating-bar.h"
@@ -2484,6 +2486,55 @@ action_properties (GSimpleAction *action,
     {
         nautilus_properties_present_dialog (selection, GTK_WIDGET (self));
     }
+}
+
+/* Ratings, tags and folder colors (see nautilus-labels.h) */
+
+static void
+action_rate (GSimpleAction *action,
+             GVariant      *parameter,
+             gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
+
+    nautilus_labels_set_rating (selection, g_variant_get_uint32 (parameter));
+}
+
+static void
+action_edit_tags (GSimpleAction *action,
+                  GVariant      *parameter,
+                  gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
+
+    if (selection != NULL)
+    {
+        nautilus_tags_dialog_present (selection, GTK_WIDGET (self));
+    }
+}
+
+static void
+action_folder_color (GSimpleAction *action,
+                     GVariant      *parameter,
+                     gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
+
+    nautilus_labels_set_folder_color (selection, g_variant_get_int32 (parameter));
+}
+
+static void
+action_toggle_marks_on_tiles (GSimpleAction *action,
+                              GVariant      *parameter,
+                              gpointer       user_data)
+{
+    GSettings *settings = nautilus_flier_settings ();
+
+    g_settings_set_boolean (settings, "marks-on-tiles",
+                            !g_settings_get_boolean (settings, "marks-on-tiles"));
 }
 
 static void
@@ -6872,6 +6923,10 @@ const GActionEntry view_entries[] =
     { .name = "console", .activate = action_open_console },
     { .name = "current-directory-console", .activate = action_current_dir_open_console },
     { .name = "properties", .activate = action_properties},
+    { .name = "rate", .parameter_type = "u", .activate = action_rate },
+    { .name = "edit-tags", .activate = action_edit_tags },
+    { .name = "folder-color", .parameter_type = "i", .activate = action_folder_color },
+    { .name = "toggle-marks-on-tiles", .activate = action_toggle_marks_on_tiles },
     { .name = "current-directory-properties", .activate = action_current_dir_properties},
     { .name = "run-in-terminal", .activate = action_run_in_terminal },
     { .name = "set-as-wallpaper", .activate = action_set_as_wallpaper },
@@ -7750,6 +7805,32 @@ nautilus_files_view_update_actions_state (NautilusFilesView *self)
     action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
                                          "remove-recent-server");
     g_simple_action_set_enabled (G_SIMPLE_ACTION (action), can_remove_recent_server);
+
+    /* Ratings, tags and folder colors need real local files. */
+    {
+        GSettings *flier = nautilus_flier_settings ();
+        gboolean all_native = selection != NULL && mode == NAUTILUS_MODE_BROWSE;
+        gboolean any_folder = FALSE;
+
+        for (GList *f = selection; f != NULL && all_native; f = f->next)
+        {
+            g_autoptr (GFile) location = nautilus_file_get_location (f->data);
+
+            all_native = g_file_is_native (location);
+            any_folder |= nautilus_file_is_directory (f->data);
+        }
+
+        action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group), "rate");
+        g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                     all_native && g_settings_get_boolean (flier, "ratings"));
+        action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group), "edit-tags");
+        g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                     all_native && g_settings_get_boolean (flier, "tags"));
+        action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group), "folder-color");
+        g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                     all_native && any_folder &&
+                                     g_settings_get_boolean (flier, "folder-colors"));
+    }
 }
 
 static void
@@ -8175,6 +8256,40 @@ nautilus_files_view_update_toolbar_menus (NautilusFilesView *self)
     nautilus_files_view_reset_view_menu (self);
 }
 
+/* The star row and the folder color row of the selection menu. */
+static void
+add_marks_rows (NautilusFilesView *self,
+                GtkPopoverMenu    *menu)
+{
+    g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
+    GActionGroup *group = self->view_action_group;
+    GAction *rate = group != NULL ? g_action_map_lookup_action (G_ACTION_MAP (group), "rate") : NULL;
+    GAction *color = group != NULL ? g_action_map_lookup_action (G_ACTION_MAP (group), "folder-color") : NULL;
+
+    if (rate != NULL && g_action_get_enabled (rate))
+    {
+        GtkWidget *row = nautilus_rating_row_new ();
+        guint rating = selection != NULL ? nautilus_file_get_rating (selection->data) : 0;
+
+        /* Show a rating only if all the selected items share it. */
+        for (GList *l = selection; l != NULL; l = l->next)
+        {
+            if (nautilus_file_get_rating (l->data) != rating)
+            {
+                rating = 0;
+                break;
+            }
+        }
+        nautilus_rating_row_set_rating (row, rating);
+        gtk_popover_menu_add_child (menu, row, "rating-row");
+    }
+
+    if (color != NULL && g_action_get_enabled (color))
+    {
+        gtk_popover_menu_add_child (menu, nautilus_folder_color_row_new (), "folder-color-row");
+    }
+}
+
 static void
 nautilus_files_view_pop_up_selection_context_menu (NautilusFilesView *self,
                                                    graphene_point_t  *point)
@@ -8203,6 +8318,7 @@ nautilus_files_view_pop_up_selection_context_menu (NautilusFilesView *self,
 
     gtk_popover_menu_set_menu_model (GTK_POPOVER_MENU (self->selection_menu),
                                      G_MENU_MODEL (self->selection_menu_model));
+    add_marks_rows (self, GTK_POPOVER_MENU (self->selection_menu));
 
     if (point == NULL)
     {
@@ -9419,6 +9535,20 @@ nautilus_files_view_class_init (NautilusFilesViewClass *klass)
      * keyboard shortcut, we need to bind it to the menu item action here. */
     gtk_widget_class_add_binding_action (widget_class, GDK_KEY_Return, 0, "view.open-with-default-application", NULL);
     gtk_widget_class_add_binding_action (widget_class, GDK_KEY_i, GDK_CONTROL_MASK, "view.properties", NULL);
+    /* Ratings: Ctrl+Alt+1-5, and Ctrl+Alt+` (or 0) to clear; reachable with the left hand. */
+    for (guint stars = 1; stars <= 5; stars++)
+    {
+        gtk_widget_class_add_binding_action (widget_class, GDK_KEY_0 + stars,
+                                             GDK_CONTROL_MASK | GDK_ALT_MASK, "view.rate", "u", stars);
+    }
+    gtk_widget_class_add_binding_action (widget_class, GDK_KEY_grave, GDK_CONTROL_MASK | GDK_ALT_MASK,
+                                         "view.rate", "u", 0);
+    gtk_widget_class_add_binding_action (widget_class, GDK_KEY_0, GDK_CONTROL_MASK | GDK_ALT_MASK,
+                                         "view.rate", "u", 0);
+    gtk_widget_class_add_binding_action (widget_class, GDK_KEY_a, GDK_CONTROL_MASK | GDK_ALT_MASK,
+                                         "view.edit-tags", NULL);
+    gtk_widget_class_add_binding_action (widget_class, GDK_KEY_r, GDK_CONTROL_MASK | GDK_SHIFT_MASK,
+                                         "view.toggle-marks-on-tiles", NULL);
     gtk_widget_class_add_binding_action (widget_class, GDK_KEY_Return, GDK_ALT_MASK, "view.properties", NULL);
     gtk_widget_class_add_binding_action (widget_class, GDK_KEY_a, GDK_CONTROL_MASK, "view.select-all", NULL);
     gtk_widget_class_add_binding_action (widget_class, GDK_KEY_i, GDK_CONTROL_MASK | GDK_SHIFT_MASK, "view.invert-selection", NULL);

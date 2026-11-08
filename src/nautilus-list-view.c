@@ -25,6 +25,7 @@
 #include "nautilus-name-cell.h"
 #include "nautilus-scheme.h"
 #include "nautilus-search-directory.h"
+#include "nautilus-marks-cell.h"
 #include "nautilus-star-cell.h"
 #include "nautilus-tag-manager.h"
 #include "nautilus-view-item.h"
@@ -975,6 +976,36 @@ setup_star_cell (GtkSignalListItemFactory *factory,
 }
 
 static void
+setup_marks_cell (GtkSignalListItemFactory *factory,
+                  GtkColumnViewCell        *listitem,
+                  gpointer                  user_data,
+                  NautilusMarksCellKind     kind)
+{
+    NautilusViewCell *cell;
+
+    cell = nautilus_marks_cell_new (NAUTILUS_LIST_BASE (user_data), kind);
+    gtk_column_view_cell_set_child (listitem, GTK_WIDGET (cell));
+    setup_cell_common (G_OBJECT (listitem), cell);
+    setup_cell_hover (cell);
+}
+
+static void
+setup_rating_cell (GtkSignalListItemFactory *factory,
+                   GtkColumnViewCell        *listitem,
+                   gpointer                  user_data)
+{
+    setup_marks_cell (factory, listitem, user_data, NAUTILUS_MARKS_CELL_RATING);
+}
+
+static void
+setup_tags_cell (GtkSignalListItemFactory *factory,
+                 GtkColumnViewCell        *listitem,
+                 gpointer                  user_data)
+{
+    setup_marks_cell (factory, listitem, user_data, NAUTILUS_MARKS_CELL_TAGS);
+}
+
+static void
 setup_label_cell (GtkSignalListItemFactory *factory,
                   GtkColumnViewCell        *listitem,
                   gpointer                  user_data)
@@ -1048,6 +1079,16 @@ setup_view_columns (NautilusListView *self)
             gtk_column_view_column_set_resizable (view_column, FALSE);
 
             self->star_column = view_column;
+        }
+        else if (g_strcmp0 (name, "rating") == 0)
+        {
+            g_signal_connect (factory, "setup", G_CALLBACK (setup_rating_cell), self);
+            gtk_column_view_column_set_resizable (view_column, FALSE);
+        }
+        else if (g_strcmp0 (name, "tags") == 0)
+        {
+            g_signal_connect (factory, "setup", G_CALLBACK (setup_tags_cell), self);
+            gtk_column_view_column_set_fixed_width (view_column, 160);
         }
         else
         {

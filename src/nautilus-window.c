@@ -66,6 +66,7 @@
 #include "nautilus-tile-layout.h"
 #include "nautilus-signaller.h"
 #include "nautilus-toolbar.h"
+#include "nautilus-labels.h"
 #include "nautilus-trash-monitor.h"
 #include "nautilus-ui-utilities.h"
 #include "nautilus-window-slot.h"
@@ -2009,6 +2010,25 @@ on_click_gesture_pressed (GtkGestureClick *gesture,
     }
 }
 
+/* Holding Alt shows the stars of every tile under the pointer. */
+static gboolean
+on_modifiers_changed (GtkEventControllerKey *controller,
+                      GdkModifierType        state)
+{
+    nautilus_labels_set_alt_held ((state & GDK_ALT_MASK) != 0 &&
+                                  (state & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_SUPER_MASK)) == 0);
+    return FALSE;
+}
+
+static void
+on_window_active_changed (GtkWindow *window)
+{
+    if (!gtk_window_is_active (window))
+    {
+        nautilus_labels_set_alt_held (FALSE);
+    }
+}
+
 static void
 nautilus_window_init (NautilusWindow *window)
 {
@@ -2063,6 +2083,14 @@ nautilus_window_init (NautilusWindow *window)
     gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_BUBBLE);
     g_signal_connect (controller, "key-pressed",
                       G_CALLBACK (nautilus_window_key_bubble), NULL);
+
+    controller = gtk_event_controller_key_new ();
+    gtk_widget_add_controller (GTK_WIDGET (window), controller);
+    gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_CAPTURE);
+    g_signal_connect (controller, "modifiers",
+                      G_CALLBACK (on_modifiers_changed), NULL);
+    g_signal_connect (window, "notify::is-active",
+                      G_CALLBACK (on_window_active_changed), NULL);
 }
 
 static void

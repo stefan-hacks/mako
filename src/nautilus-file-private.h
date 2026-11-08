@@ -26,7 +26,12 @@
 #include "nautilus-file.h"
 
 #define NAUTILUS_FILE_DEFAULT_ATTRIBUTES				\
-	"standard::*,access::*,mountable::*,time::*,unix::*,owner::*,selinux::*,id::filesystem,trash::orig-path,trash::deletion-date,metadata::*,recent::*,preview::icon"
+	"standard::*,access::*,mountable::*,time::*,unix::*,owner::*,selinux::*,id::filesystem,trash::orig-path,trash::deletion-date,metadata::*,recent::*,preview::icon," \
+	NAUTILUS_FILE_MARKS_ATTRIBUTES
+
+/* Ratings and tags, as Dolphin and File Flier store them (user.baloo.rating,
+ * user.xdg.tags). Asked for by name, so GIO only reads these two. */
+#define NAUTILUS_FILE_MARKS_ATTRIBUTES "xattr::baloo.rating,xattr::xdg.tags"
 
 /* These are in the typical sort order. Known things come first, then
  * things where we can't know, finally things where we don't yet know.
@@ -99,6 +104,10 @@ struct NautilusFilePrivate
 	GRefString *filesystem_id;
 
 	char *trash_orig_path;
+
+	/* 0 (unrated) to 5 stars, and the tags, from extended attributes */
+	guint8 rating;
+	GStrv tags;
 
 	/* The following is for file operations in progress. Since
 	 * there are normally only a few of these, we can move them to
