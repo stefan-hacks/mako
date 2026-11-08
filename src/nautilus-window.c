@@ -2143,6 +2143,7 @@ setup_inspector (NautilusWindow *window)
     GtkWidget *layout = GTK_WIDGET (window->tile_layout);
     GtkWidget *parent = gtk_widget_get_parent (layout);
     g_autoptr (GAction) visible = g_settings_create_action (nautilus_flier_settings (), "inspector-visible");
+    g_autoptr (GAction) columns = g_settings_create_action (nautilus_flier_settings (), "columns-view");
     static const GActionEntry entries[] =
     {
         { .name = "inspector-side-next", .activate = action_inspector_side_next },
@@ -2161,6 +2162,7 @@ setup_inspector (NautilusWindow *window)
     arrange_inspector (window);
 
     g_action_map_add_action (G_ACTION_MAP (window), visible);
+    g_action_map_add_action (G_ACTION_MAP (window), columns);
     g_action_map_add_action_entries (G_ACTION_MAP (window), entries, G_N_ELEMENTS (entries), window);
 
     g_signal_connect_object (nautilus_flier_settings (), "changed::inspector-visible",

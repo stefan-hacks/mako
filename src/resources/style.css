@@ -428,3 +428,8 @@ nautilus-inspector { background-color: var(--view-bg-color); }
 .inspector-preview nautilus-ql-canvas { background-color: transparent; }
 nautilus-inspector .star.rated { color: #f5c211; }
 nautilus-inspector .star { min-width: 28px; padding-left: 2px; padding-right: 2px; }
+
+/* Miller columns */
+nautilus-columns .miller-column-box { background-color: var(--view-bg-color); }
+nautilus-columns .miller-column-title { padding: 8px 12px 4px 12px; opacity: 0.8; }
+nautilus-columns .miller-column { background: none; }

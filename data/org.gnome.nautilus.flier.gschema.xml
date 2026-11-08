@@ -57,6 +57,11 @@
       <summary>Ratings and tags on the Quick Look canvas</summary>
       <description>Show stars and tag dots on the items when several files are previewed at once.</description>
     </key>
+    <key type="b" name="columns-view">
+      <default>false</default>
+      <summary>Columns view</summary>
+      <description>In the list view, show the folders above the current one as columns on its left, and a selected folder's contents on its right.</description>
+    </key>
     <key type="b" name="inspector-visible">
       <default>false</default>
       <summary>Show the inspector</summary>

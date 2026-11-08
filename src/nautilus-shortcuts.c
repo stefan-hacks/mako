@@ -89,6 +89,7 @@ static const Command commands[] =
 
     { SECTION_VIEW, N_("List View"), "slot.files-view-mode(uint32 1)", "<ctrl>1", NULL },
     { SECTION_VIEW, N_("Grid View"), "slot.files-view-mode(uint32 2)", "<ctrl>2", NULL },
+    { SECTION_VIEW, N_("Columns"), "win.columns-view", NULL, "<ctrl>3" },
     { SECTION_VIEW, N_("Zoom In"), "view.zoom-in", "<ctrl>plus", "<ctrl><alt>w" },
     { SECTION_VIEW, N_("Zoom Out"), "view.zoom-out", "<ctrl>minus", "<ctrl><alt>s" },
     { SECTION_VIEW, N_("Reset Zoom"), "view.zoom-standard", "<ctrl>0", NULL },

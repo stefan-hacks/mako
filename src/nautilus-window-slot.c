@@ -47,6 +47,7 @@
 #include "nautilus-file.h"
 #include "nautilus-file-utilities.h"
 #include "nautilus-global-preferences.h"
+#include "nautilus-columns.h"
 #include "nautilus-module.h"
 #include "nautilus-monitor.h"
 #include "nautilus-ui-utilities.h"
@@ -92,6 +93,7 @@ struct _NautilusWindowSlot
 
     GtkWidget *stack;
     GtkWidget *vbox;
+    GtkWidget *columns;
     AdwStatusPage *global_search_page;
 
     GtkWidget *extra_location_widgets;
@@ -892,6 +894,11 @@ nautilus_window_slot_constructed (GObject *object)
     self->banner = ADW_BANNER (adw_banner_new (""));
     gtk_box_append (GTK_BOX (self->vbox),
                     GTK_WIDGET (self->banner));
+
+    /* Holds the view; adds Miller columns around it in Columns mode. */
+    self->columns = nautilus_columns_new (self);
+    gtk_widget_set_vexpand (self->columns, TRUE);
+    gtk_box_append (GTK_BOX (self->vbox), self->columns);
 
     self->global_search_page = ADW_STATUS_PAGE (adw_status_page_new ());
     adw_status_page_set_icon_name (self->global_search_page, "edit-find-symbolic");
@@ -2711,7 +2718,7 @@ create_and_bind_new_content_view (NautilusWindowSlot *self,
     self->content_view = nautilus_files_view_new (view_id, self);
 
     GtkWidget *widget = GTK_WIDGET (self->content_view);
-    gtk_box_append (GTK_BOX (self->vbox), widget);
+    nautilus_columns_set_content (NAUTILUS_COLUMNS (self->columns), widget);
     gtk_widget_set_vexpand (widget, TRUE);
 
     g_signal_connect_object (self->content_view, "notify::loading",
@@ -2763,7 +2770,7 @@ nautilus_window_slot_dispose (GObject *object)
 
     if (self->content_view)
     {
-        gtk_box_remove (GTK_BOX (self->vbox), GTK_WIDGET (self->content_view));
+        nautilus_columns_set_content (NAUTILUS_COLUMNS (self->columns), NULL);
         g_clear_object (&self->content_view);
     }
 
