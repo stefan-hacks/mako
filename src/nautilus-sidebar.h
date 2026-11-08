@@ -45,4 +45,8 @@ char *nautilus_sidebar_get_location_title (NautilusSidebar *sidebar);
 void   nautilus_sidebar_step                (NautilusSidebar *sidebar,
                                              int              step);
 
+/* Folds (or unfolds) the group of the current place, with sidebar groups on. */
+void   nautilus_sidebar_fold_current        (NautilusSidebar *sidebar,
+                                             gboolean         fold);
+
 G_END_DECLS

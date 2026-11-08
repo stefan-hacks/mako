@@ -59,6 +59,8 @@ static const Command commands[] =
     { SECTION_NAVIGATE, N_("Bookmark This Folder"), "slot.bookmark-current-directory", "<ctrl>d", NULL },
     { SECTION_NAVIGATE, N_("Next Place in the Sidebar"), "win.sidebar-step(1)", NULL, "<ctrl>Down" },
     { SECTION_NAVIGATE, N_("Previous Place in the Sidebar"), "win.sidebar-step(-1)", NULL, "<ctrl>Up" },
+    { SECTION_NAVIGATE, N_("Fold the Sidebar Group"), "win.sidebar-fold(true)", NULL, "<ctrl>Left" },
+    { SECTION_NAVIGATE, N_("Unfold the Sidebar Group"), "win.sidebar-fold(false)", NULL, "<ctrl>Right" },
     { SECTION_NAVIGATE, N_("Show Sidebar"), "win.toggle-sidebar", "F9", "<alt>b" },
 
     { SECTION_TABS, N_("New Tab"), "win.new-tab", "<ctrl>t", NULL },

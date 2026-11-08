@@ -470,6 +470,10 @@ nautilus-bottom-bar > .toolbar { padding: 4px 6px; }
 /* Sidebar groups (the sidebar-groups setting), like File Flier's: a header
  * row with the group's icon, its name in bold and an arrow. */
 .navigation-sidebar row.sidebar-group-header { margin-top: 2px; }
-.navigation-sidebar row.sidebar-group-header box > image:last-of-type { opacity: 1; }
 .navigation-sidebar row.sidebar-group-header label { font-weight: bold; }
-.navigation-sidebar row.sidebar-group-header box > image { opacity: 0.7; }
+.navigation-sidebar row.sidebar-group-header box > image:first-child { opacity: 0.7; }
+/* Ctrl+Up/Down resting on a group header. */
+.navigation-sidebar row.sidebar-cursor {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 30%, transparent);
+}
+.navigation-sidebar.sidebar-grouped row:not(.sidebar-group-header) > revealer > box { margin-left: 12px; }

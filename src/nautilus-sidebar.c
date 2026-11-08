@@ -108,6 +108,7 @@ struct _NautilusSidebar
     GtkWidget *swin;
     GtkWidget *list_box;
     GtkWidget *new_bookmark_row;
+    GtkWidget *stepped_row;     /* weak: where Ctrl+Up/Down last went */
 
     NautilusBookmarkList *bookmark_list;
 
@@ -1277,6 +1278,16 @@ update_places (NautilusSidebar *sidebar)
     CloudProvidersAccount *cloud_provider_account;
     CloudProvidersProvider *cloud_provider;
 #endif
+
+    /* Places inside a group sit a little further in than its header. */
+    if (groups_on ())
+    {
+        gtk_widget_add_css_class (sidebar->list_box, "sidebar-grouped");
+    }
+    else
+    {
+        gtk_widget_remove_css_class (sidebar->list_box, "sidebar-grouped");
+    }
 
     /* save original selection */
     selected = gtk_list_box_get_selected_row (GTK_LIST_BOX (sidebar->list_box));
@@ -2478,6 +2489,26 @@ open_row (NautilusSidebarRow *self,
     }
 }
 
+/* ------------------------------------------- Ctrl+arrows in the sidebar */
+
+/* Ctrl+Up/Down move a cursor over the places and the group headers that
+ * are showing: a place is opened, a header only highlighted, so closed
+ * groups can be passed through. Ctrl+Left/Right fold and unfold the group
+ * the cursor is in. */
+
+static gboolean
+is_header (GtkWidget *row)
+{
+    NautilusSidebarRowType place_type;
+
+    if (!NAUTILUS_IS_SIDEBAR_ROW (row))
+    {
+        return FALSE;
+    }
+    g_object_get (row, "place-type", &place_type, NULL);
+    return place_type == NAUTILUS_SIDEBAR_ROW_GROUP_HEADER;
+}
+
 static gboolean
 is_steppable (GtkWidget *row)
 {
@@ -2492,10 +2523,73 @@ is_steppable (GtkWidget *row)
     }
     g_object_get (row, "place-type", &place_type, "uri", &uri, "volume", &volume, NULL);
 
-    return place_type != NAUTILUS_SIDEBAR_ROW_GROUP_HEADER && place_type != NAUTILUS_SIDEBAR_ROW_TAG &&
-           place_type != NAUTILUS_SIDEBAR_ROW_NEW_BOOKMARK &&
-           place_type != NAUTILUS_SIDEBAR_ROW_BOOKMARK_PLACEHOLDER &&
-           (uri != NULL || volume != NULL);
+    return place_type == NAUTILUS_SIDEBAR_ROW_GROUP_HEADER ||
+           place_type == NAUTILUS_SIDEBAR_ROW_TAG ||
+           (place_type != NAUTILUS_SIDEBAR_ROW_NEW_BOOKMARK &&
+            place_type != NAUTILUS_SIDEBAR_ROW_BOOKMARK_PLACEHOLDER &&
+            (uri != NULL || volume != NULL));
+}
+
+static void
+set_cursor (NautilusSidebar *sidebar,
+            GtkWidget       *row)
+{
+    if (sidebar->stepped_row != NULL)
+    {
+        gtk_widget_remove_css_class (sidebar->stepped_row, "sidebar-cursor");
+    }
+    g_set_weak_pointer (&sidebar->stepped_row, row);
+    if (row != NULL && is_header (row))
+    {
+        gtk_widget_add_css_class (row, "sidebar-cursor");
+    }
+}
+
+/* Where the cursor is: on a header, or on the place we're at (the one
+ * stepped to, rather than its twin in another group). */
+static GtkWidget *
+cursor_row (NautilusSidebar *sidebar)
+{
+    GtkListBoxRow *selected = gtk_list_box_get_selected_row (GTK_LIST_BOX (sidebar->list_box));
+    GtkWidget *stepped = sidebar->stepped_row;
+
+    if (stepped != NULL && gtk_widget_has_css_class (stepped, "sidebar-cursor"))
+    {
+        return stepped;
+    }
+    if (stepped != NULL && selected != NULL && stepped != GTK_WIDGET (selected))
+    {
+        g_autofree char *uri_selected = NULL, *uri_stepped = NULL;
+
+        g_object_get (selected, "uri", &uri_selected, NULL);
+        g_object_get (stepped, "uri", &uri_stepped, NULL);
+        if (g_strcmp0 (uri_selected, uri_stepped) == 0)
+        {
+            return stepped;
+        }
+    }
+    return selected != NULL ? GTK_WIDGET (selected) : stepped;
+}
+
+static GtkWidget *
+header_of (NautilusSidebar            *sidebar,
+           NautilusSidebarSectionType  section)
+{
+    for (GtkWidget *child = gtk_widget_get_first_child (sidebar->list_box); child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        NautilusSidebarSectionType s;
+
+        if (is_header (child))
+        {
+            g_object_get (child, "section-type", &s, NULL);
+            if (s == section)
+            {
+                return child;
+            }
+        }
+    }
+    return NULL;
 }
 
 void
@@ -2503,16 +2597,17 @@ nautilus_sidebar_step (NautilusSidebar *sidebar,
                        int              step)
 {
     GtkListBox *list = GTK_LIST_BOX (sidebar->list_box);
-    GtkListBoxRow *current = gtk_list_box_get_selected_row (list);
-    int n = 0;
+    GtkWidget *current = cursor_row (sidebar);
     GtkListBoxRow *row = NULL;
+    int n = 0;
 
     while (gtk_list_box_get_row_at_index (list, n) != NULL)
     {
         n++;
     }
 
-    int index = current != NULL ? gtk_list_box_row_get_index (current) : (step > 0 ? -1 : n);
+    int index = current != NULL ? gtk_list_box_row_get_index (GTK_LIST_BOX_ROW (current))
+                                : (step > 0 ? -1 : n);
 
     /* Rows by index are in the sorted order. */
     for (int i = index + (step > 0 ? 1 : -1); i >= 0 && i < n; i += step > 0 ? 1 : -1)
@@ -2526,10 +2621,52 @@ nautilus_sidebar_step (NautilusSidebar *sidebar,
         }
     }
 
-    if (row != NULL)
+    if (row == NULL)
+    {
+        return;
+    }
+
+    NautilusSidebarRowType place_type;
+
+    set_cursor (sidebar, GTK_WIDGET (row));
+    g_object_get (row, "place-type", &place_type, NULL);
+    if (place_type == NAUTILUS_SIDEBAR_ROW_TAG)
+    {
+        /* Tag rows aren't selectable: mark them like a header. */
+        gtk_widget_add_css_class (GTK_WIDGET (row), "sidebar-cursor");
+        on_tag_row_activated (sidebar, NAUTILUS_SIDEBAR_ROW (row));
+    }
+    else if (!is_header (GTK_WIDGET (row)))
     {
         gtk_list_box_select_row (list, row);
         open_row (NAUTILUS_SIDEBAR_ROW (row), 0);
+    }
+}
+
+void
+nautilus_sidebar_fold_current (NautilusSidebar *sidebar,
+                               gboolean         fold)
+{
+    GtkWidget *current = cursor_row (sidebar);
+    NautilusSidebarSectionType section;
+
+    if (current == NULL || !groups_on ())
+    {
+        return;
+    }
+    g_object_get (current, "section-type", &section, NULL);
+    if (group_id (section) == NULL)
+    {
+        return;
+    }
+    if (group_collapsed (section) != fold)
+    {
+        toggle_group (section);
+    }
+    /* Folded away from under the cursor: it goes to the header. */
+    if (fold && !is_header (current))
+    {
+        set_cursor (sidebar, header_of (sidebar, section));
     }
 }
 
@@ -3853,6 +3990,7 @@ on_row_activated (GtkListBox    *list_box,
     NautilusSidebarRowType place_type;
     NautilusSidebarSectionType section;
 
+    set_cursor (NAUTILUS_PLACES_SIDEBAR (user_data), NULL);
     g_object_get (row, "place-type", &place_type, "section-type", &section, NULL);
     if (place_type == NAUTILUS_SIDEBAR_ROW_GROUP_HEADER)
     {
@@ -4480,6 +4618,7 @@ nautilus_sidebar_dispose (GObject *object)
 #endif
 
     sidebar = NAUTILUS_PLACES_SIDEBAR (object);
+    g_clear_weak_pointer (&sidebar->stepped_row);
 
     g_clear_object (&sidebar->window_slot);
     g_clear_object (&sidebar->slot_signal_group);
