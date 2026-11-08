@@ -46,5 +46,7 @@ void       nautilus_columns_set_flat    (NautilusColumns    *self,
 /* Whether the list shows folders as a tree (Tree mode). The list view asks
  * when it sets up a folder. */
 gboolean   nautilus_columns_get_tree    (NautilusColumns    *self);
+/* Whether the list shows only names (Columns mode). */
+gboolean   nautilus_columns_get_names_only (NautilusColumns *self);
 
 G_END_DECLS

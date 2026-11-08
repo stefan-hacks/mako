@@ -310,8 +310,22 @@ update_columns_settings_from_metadata_and_preferences (NautilusListView *self)
     NautilusFile *file = nautilus_list_base_get_directory_as_file (NAUTILUS_LIST_BASE (self));
     g_auto (GStrv) column_order = nautilus_column_get_column_order (file);
     g_auto (GStrv) visible_columns = nautilus_column_get_visible_columns (file);
+    GtkWidget *columns = gtk_widget_get_ancestor (GTK_WIDGET (self), NAUTILUS_TYPE_COLUMNS);
+
+    /* In Columns mode the list is one column among others: names only. */
+    if (columns != NULL && nautilus_columns_get_names_only (NAUTILUS_COLUMNS (columns)))
+    {
+        g_strfreev (visible_columns);
+        visible_columns = g_strsplit ("name", ",", -1);
+    }
 
     apply_columns_settings (self, column_order, visible_columns);
+}
+
+void
+nautilus_list_view_refresh_visible_columns (NautilusListView *self)
+{
+    update_columns_settings_from_metadata_and_preferences (self);
 }
 
 static GFile *

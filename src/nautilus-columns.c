@@ -26,6 +26,7 @@
 #include "nautilus-labels.h"
 #include "nautilus-metadata.h"
 #include "nautilus-list-base.h"
+#include "nautilus-list-view.h"
 #include "nautilus-query.h"
 #include "nautilus-view-info.h"
 #include "nautilus-window-slot.h"
@@ -54,6 +55,12 @@ struct _NautilusColumns
 
     GFile *shown_location;
     guint update_id;
+
+    /* The leftmost column: the folder last opened from outside the columns
+     * (sidebar, double-click, path bar, history). Moving within the columns
+     * keeps it, unless you go above it. */
+    GFile *root;
+    gboolean moving_inside;   /* the next location change is ours */
 
     /* Columns mode, per tab. New tabs start the way the last one was set. */
     gboolean enabled;
@@ -222,6 +229,7 @@ open_info (Column    *column,
         return;
     }
 
+    self->moving_inside = TRUE;
     if (g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
     {
         nautilus_window_slot_open_location_full (self->slot, location, NULL);
@@ -403,7 +411,6 @@ static void
 update_parents (NautilusColumns *self)
 {
     GFile *location = nautilus_window_slot_get_location (self->slot);
-    g_autoptr (GFile) home = g_file_new_for_path (g_get_home_dir ());
     g_autoptr (GPtrArray) chain = g_ptr_array_new_with_free_func (g_object_unref);
     g_autoptr (GFile) child = g_object_ref (location);
     GFile *parent;
@@ -415,16 +422,13 @@ update_parents (NautilusColumns *self)
     g_set_object (&self->shown_location, location);
     clear_box (self->parents_box);
 
-    /* Up to home, if under it; else up to the root. */
-    while ((parent = g_file_get_parent (child)) != NULL)
+    /* Up to the leftmost column's folder. */
+    while (self->root != NULL && !g_file_equal (child, self->root) &&
+           (parent = g_file_get_parent (child)) != NULL)
     {
         g_ptr_array_insert (chain, 0, g_object_ref (child));
         g_set_object (&child, parent);
         g_object_unref (parent);
-        if (g_file_equal (child, home))
-        {
-            break;
-        }
     }
 
     /* chain: from the top's child down to the location; child: the top. */
@@ -494,6 +498,25 @@ update (gpointer user_data)
 }
 
 static void
+on_location_for_root (NautilusColumns *self)
+{
+    GFile *location = self->slot != NULL ? nautilus_window_slot_get_location (self->slot) : NULL;
+    gboolean inside = self->moving_inside;
+
+    self->moving_inside = FALSE;
+    if (location == NULL)
+    {
+        return;
+    }
+
+    if (!inside || self->root == NULL ||
+        !(g_file_equal (location, self->root) || g_file_has_prefix (location, self->root)))
+    {
+        g_set_object (&self->root, location);
+    }
+}
+
+static void
 schedule_update (NautilusColumns *self)
 {
     if (self->update_id == 0)
@@ -524,6 +547,12 @@ compute_mode (NautilusColumns *self)
     }
 
     return self->tree ? NAUTILUS_COLUMNS_MODE_TREE : NAUTILUS_COLUMNS_MODE_LIST;
+}
+
+gboolean
+nautilus_columns_get_names_only (NautilusColumns *self)
+{
+    return self->enabled;
 }
 
 gboolean
@@ -576,6 +605,7 @@ nautilus_columns_set_mode (NautilusColumns *self,
     }
 
     gboolean was_tree = nautilus_columns_get_tree (self);
+    gboolean was_names_only = self->enabled;
     GSettings *flier = nautilus_flier_settings ();
 
     self->enabled = mode == NAUTILUS_COLUMNS_MODE_COLUMNS;
@@ -603,6 +633,14 @@ nautilus_columns_set_mode (NautilusColumns *self,
         gtk_widget_activate_action (GTK_WIDGET (self->slot), "slot.reload", NULL);
     }
     on_view_changed (self);
+
+    /* Columns mode shows names only in the list; back out, the others. */
+    view = files_view (self);
+    if (view != NULL && was_names_only != self->enabled &&
+        NAUTILUS_IS_LIST_VIEW (nautilus_files_view_get_private_list_base (view)))
+    {
+        nautilus_list_view_refresh_visible_columns (NAUTILUS_LIST_VIEW (nautilus_files_view_get_private_list_base (view)));
+    }
 }
 
 /* ---------------------------------------------------------------- Flat view */
@@ -787,12 +825,14 @@ on_key_pressed (GtkEventControllerKey *controller,
 
     if (keyval == GDK_KEY_Left)
     {
+        self->moving_inside = TRUE;
         gtk_widget_activate_action (GTK_WIDGET (self->slot), "slot.up", NULL);
         return GDK_EVENT_STOP;
     }
 
     if (keyval == GDK_KEY_Right && self->child_shown != NULL)
     {
+        self->moving_inside = TRUE;
         nautilus_window_slot_open_location_full (self->slot, self->child_shown, NULL);
         return GDK_EVENT_STOP;
     }
@@ -924,6 +964,7 @@ nautilus_columns_dispose (GObject *object)
     g_clear_weak_pointer (&self->slot);
     g_clear_object (&self->shown_location);
     g_clear_object (&self->child_shown);
+    g_clear_object (&self->root);
     self->content = NULL;
     while ((child = gtk_widget_get_first_child (GTK_WIDGET (object))) != NULL)
     {
@@ -956,6 +997,8 @@ nautilus_columns_new (NautilusWindowSlot *slot)
     NautilusColumns *self = g_object_new (NAUTILUS_TYPE_COLUMNS, NULL);
 
     g_set_weak_pointer (&self->slot, slot);
+    g_signal_connect_object (slot, "notify::location", G_CALLBACK (on_location_for_root), self,
+                             G_CONNECT_SWAPPED);
     g_signal_connect_object (slot, "notify::location", G_CALLBACK (schedule_update), self,
                              G_CONNECT_SWAPPED);
     g_signal_connect_object (slot, "notify::location", G_CALLBACK (update_flat), self,

@@ -38,6 +38,11 @@ void                nautilus_search_hit_set_modification_time (NautilusSearchHit
 							       GDateTime         *date);
 void                nautilus_search_hit_set_access_time       (NautilusSearchHit *hit,
 							       GDateTime         *date);
+/* The file's full details, when the engine read them anyway (flat view), so
+ * the file doesn't need to be asked again. */
+void                nautilus_search_hit_set_info              (NautilusSearchHit *hit,
+                                                               GFileInfo         *info);
+GFileInfo          *nautilus_search_hit_get_info              (NautilusSearchHit *hit);
 void                nautilus_search_hit_set_creation_time     (NautilusSearchHit *hit,
 							       GDateTime         *date);
 void                nautilus_search_hit_set_fts_snippet       (NautilusSearchHit *hit,

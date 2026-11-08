@@ -20,6 +20,8 @@ G_DECLARE_FINAL_TYPE (NautilusListView, nautilus_list_view, NAUTILUS, LIST_VIEW,
 NautilusListView *nautilus_list_view_new (void);
 
 void nautilus_list_view_present_column_editor (NautilusListView *self);
+/* Again, e.g. on entering or leaving Columns mode, which shows names only. */
+void nautilus_list_view_refresh_visible_columns (NautilusListView *self);
 
 /* Headings over the groups, when the view's items are grouped. */
 void nautilus_list_view_set_group_by (NautilusListView *self,

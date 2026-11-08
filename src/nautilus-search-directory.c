@@ -571,6 +571,12 @@ search_engine_hits_added (NautilusSearchEngine    *engine,
         NautilusSearchHit *hit = hits->pdata[i];
         const char *uri = nautilus_search_hit_get_uri (hit);
         NautilusFile *hit_file = nautilus_file_get_by_uri (uri);
+        GFileInfo *info = nautilus_search_hit_get_info (hit);
+
+        if (info != NULL && !hit_file->details->got_file_info)
+        {
+            nautilus_file_update_info (hit_file, info);
+        }
 
         nautilus_search_hit_compute_scores (hit, now, query_location);
         nautilus_file_set_search_relevance (hit_file, nautilus_search_hit_get_relevance (hit));

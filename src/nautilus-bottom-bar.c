@@ -360,6 +360,7 @@ build_views_button (void)
     g_autoptr (GMenu) views = g_menu_new ();
     g_autoptr (GMenu) zoom = g_menu_new ();
     g_autoptr (GMenu) more = g_menu_new ();
+    g_autoptr (GMenu) panels = g_menu_new ();
     g_autoptr (GMenuItem) item = NULL;
     GtkWidget *popover;
     GtkWidget *zoom_button;
@@ -388,6 +389,10 @@ build_views_button (void)
     g_menu_append (more, _("Captions…"), "view.visible-captions");
     g_menu_append_section (menu, NULL, G_MENU_MODEL (more));
 
+    g_menu_append (panels, _("_Inspector"), "win.inspector-visible");
+    g_menu_append (panels, _("_Bottom Bar"), "win.bottom-bar");
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (panels));
+
     popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
     zoom_button = gtk_button_new_from_icon_name ("zoom-out-symbolic");
     gtk_actionable_set_action_name (GTK_ACTIONABLE (zoom_button), "view.zoom-out");
@@ -411,7 +416,6 @@ static void
 nautilus_bottom_bar_init (NautilusBottomBar *self)
 {
     GtkWidget *linked = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    GtkWidget *button;
     GtkEventController *keys;
 
     gtk_widget_add_css_class (GTK_WIDGET (self), "bottom-bar");
@@ -454,10 +458,6 @@ nautilus_bottom_bar_init (NautilusBottomBar *self)
     gtk_box_append (GTK_BOX (linked), self->stack);
     gtk_box_append (GTK_BOX (linked), self->sort_button);
     gtk_box_append (GTK_BOX (self->box), linked);
-
-    button = icon_toggle ("nautilus-folder-search-symbolic", _("Search (Ctrl+F)"));
-    gtk_actionable_set_action_name (GTK_ACTIONABLE (button), "slot.search-visible");
-    gtk_box_append (GTK_BOX (self->box), button);
 
     self->flat_button = icon_toggle ("view-paged-symbolic", _("Flat View: All Files in Subfolders (Alt+R)"));
     g_signal_connect (self->flat_button, "toggled", G_CALLBACK (on_flat_toggled), self);

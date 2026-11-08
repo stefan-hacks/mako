@@ -36,6 +36,7 @@ struct _NautilusSearchHit
     GDateTime *creation_time;
     gdouble fts_rank;
     gchar *fts_snippet;
+    GFileInfo *info;     /* flat view: the details, read along the way */
 
     gdouble relevance;
 };
@@ -216,6 +217,19 @@ nautilus_search_hit_set_access_time (NautilusSearchHit *hit,
 }
 
 void
+nautilus_search_hit_set_info (NautilusSearchHit *hit,
+                              GFileInfo         *info)
+{
+    g_set_object (&hit->info, info);
+}
+
+GFileInfo *
+nautilus_search_hit_get_info (NautilusSearchHit *hit)
+{
+    return hit->info;
+}
+
+void
 nautilus_search_hit_set_creation_time (NautilusSearchHit *hit,
                                        GDateTime         *date)
 {
@@ -373,6 +387,7 @@ nautilus_search_hit_finalize (GObject *object)
     NautilusSearchHit *hit = NAUTILUS_SEARCH_HIT (object);
 
     g_free (hit->uri);
+    g_clear_object (&hit->info);
 
     if (hit->access_time != NULL)
     {

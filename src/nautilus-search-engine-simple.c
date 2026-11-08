@@ -23,6 +23,8 @@
 #include <config.h>
 #include "nautilus-search-engine-simple.h"
 
+#include "nautilus-file-private.h"
+
 #include "nautilus-query.h"
 #include "nautilus-search-hit.h"
 #include "nautilus-search-provider.h"
@@ -95,7 +97,11 @@ visit_directory (NautilusSearchEngineSimple *self,
                  GFile                      *dir)
 {
     NautilusQuery *query = nautilus_search_provider_get_query (self);
-    const char *attributes = nautilus_query_has_mime_types (query)
+    gboolean flat_view = nautilus_query_get_flat (query);
+    /* Flat view reads what the view needs right here, in this thread, rather
+     * than having each file asked again afterwards, one at a time. */
+    const char *attributes = flat_view ? NAUTILUS_FILE_DEFAULT_ATTRIBUTES :
+                             nautilus_query_has_mime_types (query)
                              ? STD_ATTRIBUTES_WITH_CONTENT_TYPE : STD_ATTRIBUTES;
     GCancellable *cancellable = nautilus_search_provider_get_cancellable (self);
 
@@ -115,7 +121,7 @@ visit_directory (NautilusSearchEngineSimple *self,
     gboolean show_hidden = nautilus_query_get_show_hidden_files (query);
     gboolean recursion_enabled = nautilus_query_recursive (query);
     gboolean per_location_recursive_check = nautilus_query_recursive_local_only (query);
-    gboolean flat = nautilus_query_get_flat (query);
+    gboolean flat = flat_view;
 
     GFileInfo *info;
     while (g_file_enumerator_iterate (enumerator, &info, NULL, cancellable, NULL) &&
@@ -208,6 +214,10 @@ visit_directory (NautilusSearchEngineSimple *self,
             nautilus_search_hit_set_modification_time (hit, mtime);
             nautilus_search_hit_set_access_time (hit, atime);
             nautilus_search_hit_set_creation_time (hit, ctime);
+            if (flat)
+            {
+                nautilus_search_hit_set_info (hit, info);
+            }
 
             nautilus_search_provider_add_hit (self, hit);
 
@@ -314,6 +324,15 @@ run_in_thread (NautilusSearchProvider *provider)
 static guint
 search_delay (NautilusSearchProvider *provider)
 {
+    NautilusQuery *query = nautilus_search_provider_get_query (provider);
+    g_autofree char *text = query != NULL ? nautilus_query_get_text (query) : NULL;
+
+    /* Waiting for more typing makes no sense for flat view's first run. */
+    if (query != NULL && nautilus_query_get_flat (query) && text == NULL)
+    {
+        return 0;
+    }
+
     return 500;
 }
 
