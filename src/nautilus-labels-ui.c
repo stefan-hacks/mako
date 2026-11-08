@@ -497,11 +497,13 @@ switch_row_new (const char *title,
     return row;
 }
 
-/* A switch per sidebar group: on unless the group is in sidebar-hidden-groups. */
+/* A switch per sidebar group or place: on unless its id is in the row's
+ * list key (sidebar-hidden-groups or sidebar-hidden-places). */
 static void
 sync_group_switch (GtkWidget *row)
 {
-    g_auto (GStrv) hidden = g_settings_get_strv (nautilus_flier_settings (), "sidebar-hidden-groups");
+    const char *key = g_object_get_data (G_OBJECT (row), "list-key");
+    g_auto (GStrv) hidden = g_settings_get_strv (nautilus_flier_settings (), key);
     const char *id = g_object_get_data (G_OBJECT (row), "group-id");
 
     adw_switch_row_set_active (ADW_SWITCH_ROW (row), !g_strv_contains ((const char * const *) hidden, id));
@@ -510,7 +512,8 @@ sync_group_switch (GtkWidget *row)
 static void
 on_group_switch (GtkWidget *row)
 {
-    g_auto (GStrv) hidden = g_settings_get_strv (nautilus_flier_settings (), "sidebar-hidden-groups");
+    const char *key = g_object_get_data (G_OBJECT (row), "list-key");
+    g_auto (GStrv) hidden = g_settings_get_strv (nautilus_flier_settings (), key);
     g_autoptr (GStrvBuilder) builder = g_strv_builder_new ();
     const char *id = g_object_get_data (G_OBJECT (row), "group-id");
     gboolean show = adw_switch_row_get_active (ADW_SWITCH_ROW (row));
@@ -531,25 +534,35 @@ on_group_switch (GtkWidget *row)
 
     if (!g_strv_equal ((const char * const *) result, (const char * const *) hidden))
     {
-        g_settings_set_strv (nautilus_flier_settings (), "sidebar-hidden-groups", (const char * const *) result);
+        g_settings_set_strv (nautilus_flier_settings (), key, (const char * const *) result);
     }
+}
+
+static GtkWidget *
+list_switch_new (const char *key,
+                 const char *title,
+                 const char *id)
+{
+    GtkWidget *row = adw_switch_row_new ();
+    g_autofree char *signal = g_strconcat ("changed::", key, NULL);
+
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
+    adw_preferences_row_set_use_underline (ADW_PREFERENCES_ROW (row), TRUE);
+    g_object_set_data (G_OBJECT (row), "group-id", (gpointer) id);
+    g_object_set_data (G_OBJECT (row), "list-key", (gpointer) key);
+    sync_group_switch (row);
+    g_signal_connect (row, "notify::active", G_CALLBACK (on_group_switch), NULL);
+    g_signal_connect_object (nautilus_flier_settings (), signal,
+                             G_CALLBACK (sync_group_switch), row, G_CONNECT_SWAPPED);
+
+    return row;
 }
 
 static GtkWidget *
 group_switch_new (const char *title,
                   const char *id)
 {
-    GtkWidget *row = adw_switch_row_new ();
-
-    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
-    adw_preferences_row_set_use_underline (ADW_PREFERENCES_ROW (row), TRUE);
-    g_object_set_data (G_OBJECT (row), "group-id", (gpointer) id);
-    sync_group_switch (row);
-    g_signal_connect (row, "notify::active", G_CALLBACK (on_group_switch), NULL);
-    g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-hidden-groups",
-                             G_CALLBACK (sync_group_switch), row, G_CONNECT_SWAPPED);
-
-    return row;
+    return list_switch_new ("sidebar-hidden-groups", title, id);
 }
 
 static void
@@ -668,6 +681,27 @@ nautilus_labels_preferences_page_new (void)
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), group_switch_new (_("_Cloud"), "cloud"));
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), group_switch_new (_("_Recent Folders"), "recent"));
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), group_switch_new (_("_Tags"), "tags"));
+    adw_preferences_page_add (ADW_PREFERENCES_PAGE (page), ADW_PREFERENCES_GROUP (group));
+
+    /* What the Places section holds */
+    group = adw_preferences_group_new ();
+    adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (group), _("Places"));
+    {
+        static const struct { const char *title; const char *id; } places[] =
+        {
+            { N_("Home"), "home" }, { N_("Recent Files"), "recent" }, { N_("Starred"), "starred" },
+            { N_("Downloads"), "downloads" }, { N_("Documents"), "documents" },
+            { N_("Pictures"), "pictures" }, { N_("Videos"), "videos" }, { N_("Music"), "music" },
+            { N_("Network"), "network" }, { N_("Trash"), "trash" },
+        };
+
+        for (guint i = 0; i < G_N_ELEMENTS (places); i++)
+        {
+            adw_preferences_group_add (ADW_PREFERENCES_GROUP (group),
+                                       list_switch_new ("sidebar-hidden-places",
+                                                        _(places[i].title), places[i].id));
+        }
+    }
     adw_preferences_page_add (ADW_PREFERENCES_PAGE (page), ADW_PREFERENCES_GROUP (group));
 
     /* Quick Look */

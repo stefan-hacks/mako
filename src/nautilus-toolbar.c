@@ -31,6 +31,7 @@
 #include "nautilus-history-controls.h"
 #include "nautilus-location-entry.h"
 #include "nautilus-bottom-bar.h"
+#include "nautilus-shortcuts.h"
 #include "nautilus-labels.h"
 #include "nautilus-pathbar.h"
 #include "nautilus-view-controls.h"
@@ -58,6 +59,7 @@ struct _NautilusToolbar
     GtkWidget *focus_before_location_entry;
 
     GtkWidget *sidebar_button;
+    GtkWidget *sidebar_toggle;
     gboolean show_new_folder_button;
     gboolean show_sidebar_button;
     gboolean sidebar_button_active;
@@ -301,6 +303,9 @@ nautilus_toolbar_init (NautilusToolbar *self)
     g_type_ensure (NAUTILUS_TYPE_LOCATION_ENTRY);
 
     gtk_widget_init_template (GTK_WIDGET (self));
+
+    g_object_set_data (G_OBJECT (self->sidebar_toggle), "flier-tooltip-action", (gpointer) "win.toggle-sidebar");
+    nautilus_shortcuts_add_tooltips (GTK_WIDGET (self));
 
     g_signal_connect_object (nautilus_flier_settings (), "changed::bottom-bar",
                              G_CALLBACK (on_bottom_bar_setting), self, G_CONNECT_SWAPPED);
@@ -549,6 +554,8 @@ nautilus_toolbar_class_init (NautilusToolbarClass *klass)
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, search_container);
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, path_bar);
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, location_entry);
+    gtk_widget_class_bind_template_child_full (widget_class, "show_sidebar_button", FALSE,
+                                               G_STRUCT_OFFSET (NautilusToolbar, sidebar_toggle));
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, search_button_stack);
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, view_controls);
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, search_button);

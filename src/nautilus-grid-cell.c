@@ -288,13 +288,45 @@ cell_file (NautilusGridCell *self)
 }
 
 /* Whether the stars are showing, and so clickable. */
+
+/* The settings the tiles draw by, read once per change rather than per
+ * frame and tile. */
+static struct
+{
+    gboolean ready, ratings, tags, marks_on_tiles;
+} marks_settings;
+
+static void
+read_marks_settings (void)
+{
+    GSettings *flier = nautilus_flier_settings ();
+
+    marks_settings.ratings = g_settings_get_boolean (flier, "ratings");
+    marks_settings.tags = g_settings_get_boolean (flier, "tags");
+    marks_settings.marks_on_tiles = g_settings_get_boolean (flier, "marks-on-tiles");
+}
+
+static void
+ensure_marks_settings (void)
+{
+    if (!marks_settings.ready)
+    {
+        GSettings *flier = nautilus_flier_settings ();
+
+        marks_settings.ready = TRUE;
+        read_marks_settings ();
+        g_signal_connect (flier, "changed::ratings", G_CALLBACK (read_marks_settings), NULL);
+        g_signal_connect (flier, "changed::tags", G_CALLBACK (read_marks_settings), NULL);
+        g_signal_connect (flier, "changed::marks-on-tiles", G_CALLBACK (read_marks_settings), NULL);
+    }
+}
+
 static gboolean
 stars_active (NautilusGridCell *self,
               NautilusFile     *file)
 {
-    GSettings *flier = nautilus_flier_settings ();
-
-    if (file == NULL || !g_settings_get_boolean (flier, "ratings"))
+    ensure_marks_settings ();
+    if (file == NULL || !marks_settings.ratings)
     {
         return FALSE;
     }
@@ -304,7 +336,7 @@ stars_active (NautilusGridCell *self,
         return TRUE;
     }
 
-    return nautilus_file_get_rating (file) > 0 && g_settings_get_boolean (flier, "marks-on-tiles");
+    return nautilus_file_get_rating (file) > 0 && marks_settings.marks_on_tiles;
 }
 
 static void
@@ -312,7 +344,6 @@ snapshot_marks (NautilusGridCell *self,
                 GtkSnapshot      *snapshot)
 {
     NautilusFile *file = cell_file (self);
-    GSettings *flier = nautilus_flier_settings ();
     graphene_rect_t stars;
 
     if (file == NULL)
@@ -340,8 +371,8 @@ snapshot_marks (NautilusGridCell *self,
 
     const char * const *tags = nautilus_file_get_tags (file);
 
-    if (tags != NULL && g_settings_get_boolean (flier, "tags") &&
-        g_settings_get_boolean (flier, "marks-on-tiles"))
+    ensure_marks_settings ();
+    if (tags != NULL && marks_settings.tags && marks_settings.marks_on_tiles)
     {
         guint icon_size;
 

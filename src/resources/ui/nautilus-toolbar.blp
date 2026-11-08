@@ -87,6 +87,13 @@ template $NautilusToolbar: Adw.Bin {
     }
 
     [end]
+    ToggleButton show_inspector_button {
+      tooltip-text: _("Show Inspector");
+      icon-name: "sidebar-show-right-symbolic";
+      action-name: "win.inspector-visible";
+    }
+
+    [end]
     $NautilusViewControls view_controls {
       window-slot: bind template.window-slot;
     }

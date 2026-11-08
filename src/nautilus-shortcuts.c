@@ -298,6 +298,122 @@ nautilus_shortcuts_get_accel (const char *detailed_action)
     return NULL;
 }
 
+/* --------------------------------------------------------- Tooltips */
+
+#define TOOLTIP_BASE "flier-tooltip-base"
+#define TOOLTIP_BUSY "flier-tooltip-busy"
+
+static char *
+widget_action (GtkWidget *widget)
+{
+    const char *named = g_object_get_data (G_OBJECT (widget), "flier-tooltip-action");
+
+    if (named != NULL)
+    {
+        return g_strdup (named);
+    }
+    if (!GTK_IS_ACTIONABLE (widget) || gtk_actionable_get_action_name (GTK_ACTIONABLE (widget)) == NULL)
+    {
+        return NULL;
+    }
+    return g_action_print_detailed_name (gtk_actionable_get_action_name (GTK_ACTIONABLE (widget)),
+                                         gtk_actionable_get_action_target_value (GTK_ACTIONABLE (widget)));
+}
+
+static char *
+key_label_for (GtkWidget  *widget,
+               const char *action)
+{
+    g_autofree char *accel = nautilus_shortcuts_get_accel (action);
+    guint key;
+    GdkModifierType mods;
+
+    if (accel == NULL)
+    {
+        /* Not in our table: what the application has for it. */
+        GtkApplication *app = GTK_APPLICATION (g_application_get_default ());
+        g_auto (GStrv) accels = app != NULL ? gtk_application_get_accels_for_action (app, action) : NULL;
+
+        if (accels != NULL && accels[0] != NULL)
+        {
+            accel = g_strdup (accels[0]);
+        }
+    }
+    if (accel == NULL || !gtk_accelerator_parse (accel, &key, &mods))
+    {
+        return NULL;
+    }
+    return gtk_accelerator_get_label (key, mods);
+}
+
+static void
+update_tooltip (GtkWidget *widget)
+{
+    const char *base = g_object_get_data (G_OBJECT (widget), TOOLTIP_BASE);
+    g_autofree char *action = widget_action (widget);
+    g_autofree char *label = action != NULL ? key_label_for (widget, action) : NULL;
+    g_autofree char *text = NULL;
+
+    if (base == NULL)
+    {
+        return;
+    }
+    text = label != NULL ? g_strdup_printf ("%s (%s)", base, label) : g_strdup (base);
+
+    g_object_set_data (G_OBJECT (widget), TOOLTIP_BUSY, GINT_TO_POINTER (TRUE));
+    gtk_widget_set_tooltip_text (widget, text);
+    g_object_set_data (G_OBJECT (widget), TOOLTIP_BUSY, NULL);
+}
+
+/* The widget's own code changed its tooltip: that's the new base. */
+static void
+on_tooltip_changed (GtkWidget *widget)
+{
+    const char *text = gtk_widget_get_tooltip_text (widget);
+
+    if (g_object_get_data (G_OBJECT (widget), TOOLTIP_BUSY) != NULL)
+    {
+        return;
+    }
+    g_object_set_data_full (G_OBJECT (widget), TOOLTIP_BASE, g_strdup (text), g_free);
+    update_tooltip (widget);
+}
+
+static void
+add_tooltips (GtkWidget *widget)
+{
+    for (GtkWidget *child = gtk_widget_get_first_child (widget); child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        add_tooltips (child);
+    }
+
+    const char *text = gtk_widget_get_tooltip_text (widget);
+    g_autofree char *action = NULL;
+
+    if (text == NULL || g_object_get_data (G_OBJECT (widget), TOOLTIP_BASE) != NULL)
+    {
+        return;
+    }
+    action = widget_action (widget);
+    if (action == NULL)
+    {
+        return;
+    }
+
+    g_object_set_data_full (G_OBJECT (widget), TOOLTIP_BASE, g_strdup (text), g_free);
+    update_tooltip (widget);
+    g_signal_connect (widget, "notify::tooltip-text", G_CALLBACK (on_tooltip_changed), NULL);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::custom-shortcuts",
+                             G_CALLBACK (update_tooltip), widget, G_CONNECT_SWAPPED);
+}
+
+void
+nautilus_shortcuts_add_tooltips (GtkWidget *root)
+{
+    add_tooltips (root);
+}
+
 /* --------------------------------------------------------- Running */
 
 static void

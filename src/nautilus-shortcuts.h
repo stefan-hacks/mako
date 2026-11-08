@@ -22,4 +22,9 @@ void nautilus_shortcuts_dialog_present (GtkWindow *window);
  * left-hand one if it has one, or NULL. */
 char *nautilus_shortcuts_get_accel     (const char *detailed_action);
 
+/* Adds the key to the tooltips of the buttons in @root that run a command
+ * ("Show Sidebar (Alt+B)"), and keeps them right when keys change. A
+ * widget without an action can name one in its "flier-tooltip-action" data. */
+void  nautilus_shortcuts_add_tooltips  (GtkWidget  *root);
+
 G_END_DECLS

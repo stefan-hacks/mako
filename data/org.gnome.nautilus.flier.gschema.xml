@@ -88,6 +88,11 @@
       <summary>Order of the sidebar groups</summary>
       <description>Drag a group's header onto another, or use Move Up and Move Down in its menu.</description>
     </key>
+    <key type="as" name="sidebar-hidden-places">
+      <default>['music']</default>
+      <summary>Hidden places</summary>
+      <description>Rows of the Places section not shown: home, recent, starred, downloads, documents, pictures, videos, music, network, trash. A bookmark for a folder shown here is left out of Bookmarks.</description>
+    </key>
     <key type="as" name="sidebar-hidden-groups">
       <default>[]</default>
       <summary>Hidden sidebar groups</summary>

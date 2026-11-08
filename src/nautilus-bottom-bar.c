@@ -505,7 +505,8 @@ nautilus_bottom_bar_init (NautilusBottomBar *self)
     gtk_box_append (GTK_BOX (linked), self->sort_button);
     gtk_box_append (GTK_BOX (self->box), linked);
 
-    self->flat_button = icon_toggle ("view-paged-symbolic", _("Flat View: All Files in Subfolders (Alt+R)"));
+    self->flat_button = icon_toggle ("view-paged-symbolic", _("Flat View: All Files in Subfolders"));
+    g_object_set_data (G_OBJECT (self->flat_button), "flier-tooltip-action", (gpointer) "win.flat-view");
     g_signal_connect (self->flat_button, "toggled", G_CALLBACK (on_flat_toggled), self);
     gtk_box_append (GTK_BOX (self->box), self->flat_button);
 
@@ -580,6 +581,7 @@ nautilus_bottom_bar_new (NautilusWindowSlot *slot)
     sync_flat (self);
     sync_sort_menu (self);
     sync_search (self);
+    nautilus_shortcuts_add_tooltips (GTK_WIDGET (self));
 
     return GTK_WIDGET (self);
 }

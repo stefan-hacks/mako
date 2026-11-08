@@ -565,6 +565,59 @@ group_hidden (NautilusSidebarSectionType section)
     return id != NULL && g_strv_contains ((const char * const *) hidden, id);
 }
 
+static gboolean path_is_home_dir (const char *path);
+
+static gboolean
+place_hidden (const char *id)
+{
+    g_auto (GStrv) hidden = g_settings_get_strv (nautilus_flier_settings (), "sidebar-hidden-places");
+
+    return g_strv_contains ((const char * const *) hidden, id);
+}
+
+/* The user folders Places holds, after Home. */
+static const struct
+{
+    const char *id;
+    GUserDirectory directory;
+    const char *icon;
+} user_folders[] =
+{
+    { "downloads", G_USER_DIRECTORY_DOWNLOAD, "folder-download-symbolic" },
+    { "documents", G_USER_DIRECTORY_DOCUMENTS, "folder-documents-symbolic" },
+    { "pictures", G_USER_DIRECTORY_PICTURES, "folder-pictures-symbolic" },
+    { "videos", G_USER_DIRECTORY_VIDEOS, "folder-videos-symbolic" },
+    { "music", G_USER_DIRECTORY_MUSIC, "folder-music-symbolic" },
+};
+
+/* The uri of a user folder Places shows, or NULL. */
+static char *
+user_folder_uri (guint i)
+{
+    const char *path = g_get_user_special_dir (user_folders[i].directory);
+
+    if (path == NULL || path_is_home_dir (path) || place_hidden (user_folders[i].id))
+    {
+        return NULL;
+    }
+    return g_filename_to_uri (path, NULL, NULL);
+}
+
+static gboolean
+is_user_folder_uri (const char *uri)
+{
+    for (guint i = 0; i < G_N_ELEMENTS (user_folders); i++)
+    {
+        g_autofree char *folder = user_folder_uri (i);
+
+        if (folder != NULL && g_strcmp0 (folder, uri) == 0)
+        {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 static gboolean
 list_box_filter_func (GtkListBoxRow *row,
                       gpointer       user_data)
@@ -1314,16 +1367,40 @@ update_places (NautilusSidebar *sidebar)
 
     /* home folder */
     home_uri = get_home_directory_uri ();
-    start_icon = g_themed_icon_new_with_default_fallbacks (ICON_NAME_HOME);
-    add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
-               NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
-               _("Home"), start_icon, NULL, home_uri,
-               NULL, NULL, NULL, NULL, 0,
-               _("Open Personal Folder"));
-    g_object_unref (start_icon);
+    if (!place_hidden ("home"))
+    {
+        start_icon = g_themed_icon_new_with_default_fallbacks (ICON_NAME_HOME);
+        add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
+                   NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
+                   _("Home"), start_icon, NULL, home_uri,
+                   NULL, NULL, NULL, NULL, 0,
+                   _("Open Personal Folder"));
+        g_object_unref (start_icon);
+    }
     g_free (home_uri);
 
-    if (should_show_recent (sidebar))
+    /* Downloads, Documents, Pictures, Videos and Music */
+    for (guint i = 0; i < G_N_ELEMENTS (user_folders); i++)
+    {
+        g_autofree char *folder_uri = user_folder_uri (i);
+        g_autofree char *path = NULL;
+        g_autofree char *basename = NULL;
+
+        if (folder_uri == NULL)
+        {
+            continue;
+        }
+        path = g_filename_from_uri (folder_uri, NULL, NULL);
+        basename = g_filename_display_basename (path);
+        start_icon = g_themed_icon_new_with_default_fallbacks (user_folders[i].icon);
+        add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
+                   NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
+                   basename, start_icon, NULL, folder_uri,
+                   NULL, NULL, NULL, NULL, 0, path);
+        g_object_unref (start_icon);
+    }
+
+    if (should_show_recent (sidebar) && !place_hidden ("recent"))
     {
         start_icon = g_themed_icon_new_with_default_fallbacks ("document-open-recent-symbolic");
         add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
@@ -1334,13 +1411,16 @@ update_places (NautilusSidebar *sidebar)
         g_object_unref (start_icon);
     }
 
-    start_icon = g_themed_icon_new_with_default_fallbacks ("starred-symbolic");
-    add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
-               NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
-               _("Starred"), start_icon, NULL, SCHEME_STARRED ":///",
-               NULL, NULL, NULL, NULL, 0,
-               _("Starred Files"));
-    g_object_unref (start_icon);
+    if (!place_hidden ("starred"))
+    {
+        start_icon = g_themed_icon_new_with_default_fallbacks ("starred-symbolic");
+        add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
+                   NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
+                   _("Starred"), start_icon, NULL, SCHEME_STARRED ":///",
+                   NULL, NULL, NULL, NULL, 0,
+                   _("Starred Files"));
+        g_object_unref (start_icon);
+    }
 
     /* desktop */
     if (sidebar->show_desktop)
@@ -1360,16 +1440,19 @@ update_places (NautilusSidebar *sidebar)
     }
 
     /* Network view */
-    start_icon = g_themed_icon_new_with_default_fallbacks (ICON_NAME_NETWORK_VIEW);
-    add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
-               NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
-               _("Network"), start_icon, NULL, SCHEME_NETWORK_VIEW ":///",
-               NULL, NULL, NULL, NULL, 0,
-               _("Open Network Locations"));
-    g_object_unref (start_icon);
+    if (!place_hidden ("network"))
+    {
+        start_icon = g_themed_icon_new_with_default_fallbacks (ICON_NAME_NETWORK_VIEW);
+        add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
+                   NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
+                   _("Network"), start_icon, NULL, SCHEME_NETWORK_VIEW ":///",
+                   NULL, NULL, NULL, NULL, 0,
+                   _("Open Network Locations"));
+        g_object_unref (start_icon);
+    }
 
     /* Trash */
-    if (sidebar->show_trash)
+    if (sidebar->show_trash && !place_hidden ("trash"))
     {
         start_icon = nautilus_trash_monitor_get_symbolic_icon ();
         sidebar->trash_row = add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
@@ -1645,6 +1728,12 @@ update_places (NautilusSidebar *sidebar)
 
         GFile *location = nautilus_bookmark_get_location (l->data);
         g_autofree char *mount_uri = nautilus_bookmark_get_uri (l->data);
+
+        /* Places has it already. */
+        if (is_user_folder_uri (mount_uri))
+        {
+            continue;
+        }
 
         gboolean is_native = g_file_is_native (location);
         tooltip = is_native ? g_file_get_path (location) : g_uri_unescape_string (mount_uri, NULL);
@@ -4452,6 +4541,8 @@ nautilus_sidebar_init (NautilusSidebar *sidebar)
                              G_CALLBACK (on_order_changed), sidebar, G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-group-order",
                              G_CALLBACK (on_order_changed), sidebar, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-hidden-places",
+                             G_CALLBACK (update_places), sidebar, G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-groups",
                              G_CALLBACK (update_places), sidebar, G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_labels_get (), "tags-changed",
