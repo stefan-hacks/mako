@@ -2300,6 +2300,7 @@ setup_inspector (NautilusWindow *window)
     GtkWidget *parent = gtk_widget_get_parent (layout);
     g_autoptr (GAction) visible = g_settings_create_action (nautilus_flier_settings (), "inspector-visible");
     g_autoptr (GAction) side = g_settings_create_action (nautilus_flier_settings (), "inspector-side");
+    g_autoptr (GAction) bottom_bar = g_settings_create_action (nautilus_flier_settings (), "bottom-bar");
     static const GActionEntry entries[] =
     {
         { .name = "inspector-side-next", .activate = action_inspector_side_next },
@@ -2323,6 +2324,7 @@ setup_inspector (NautilusWindow *window)
 
     g_action_map_add_action (G_ACTION_MAP (window), visible);
     g_action_map_add_action (G_ACTION_MAP (window), side);
+    g_action_map_add_action (G_ACTION_MAP (window), bottom_bar);
     g_action_map_add_action_entries (G_ACTION_MAP (window), entries, G_N_ELEMENTS (entries), window);
     g_signal_connect (window, "notify::active-slot", G_CALLBACK (on_active_slot_for_view_mode), NULL);
 

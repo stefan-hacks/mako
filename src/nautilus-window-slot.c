@@ -47,6 +47,7 @@
 #include "nautilus-file.h"
 #include "nautilus-file-utilities.h"
 #include "nautilus-global-preferences.h"
+#include "nautilus-bottom-bar.h"
 #include "nautilus-columns.h"
 #include "nautilus-module.h"
 #include "nautilus-monitor.h"
@@ -94,6 +95,7 @@ struct _NautilusWindowSlot
     GtkWidget *stack;
     GtkWidget *vbox;
     GtkWidget *columns;
+    GtkWidget *bottom_bar;
     AdwStatusPage *global_search_page;
 
     GtkWidget *extra_location_widgets;
@@ -581,6 +583,13 @@ nautilus_window_slot_handle_event (NautilusWindowSlot    *self,
     action = g_action_map_lookup_action (G_ACTION_MAP (self->slot_action_group),
                                          "search-visible");
 
+    /* With the tab's bar, typing filters the folder rather than searching. */
+    if (self->bottom_bar != NULL && !nautilus_window_slot_get_search_visible (self) &&
+        nautilus_bottom_bar_handle_event (NAUTILUS_BOTTOM_BAR (self->bottom_bar), controller, keyval, state))
+    {
+        return GDK_EVENT_STOP;
+    }
+
     if (keyval == GDK_KEY_Escape ||
         keyval == GDK_KEY_BackSpace)
     {
@@ -876,8 +885,13 @@ nautilus_window_slot_constructed (GObject *object)
 
     G_OBJECT_CLASS (nautilus_window_slot_parent_class)->constructed (object);
 
+    /* The pages, and under them the tab's bar. */
+    GtkWidget *outer = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+
     self->stack = gtk_stack_new ();
-    adw_bin_set_child (ADW_BIN (self), self->stack);
+    gtk_widget_set_vexpand (self->stack, TRUE);
+    gtk_box_append (GTK_BOX (outer), self->stack);
+    adw_bin_set_child (ADW_BIN (self), outer);
 
     self->vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
     gtk_stack_add_child (GTK_STACK (self->stack), self->vbox);
@@ -899,6 +913,12 @@ nautilus_window_slot_constructed (GObject *object)
     self->columns = nautilus_columns_new (self);
     gtk_widget_set_vexpand (self->columns, TRUE);
     gtk_box_append (GTK_BOX (self->vbox), self->columns);
+
+    if (self->mode == NAUTILUS_MODE_BROWSE)
+    {
+        self->bottom_bar = nautilus_bottom_bar_new (self);
+        gtk_box_append (GTK_BOX (outer), self->bottom_bar);
+    }
 
     self->global_search_page = ADW_STATUS_PAGE (adw_status_page_new ());
     adw_status_page_set_icon_name (self->global_search_page, "edit-find-symbolic");

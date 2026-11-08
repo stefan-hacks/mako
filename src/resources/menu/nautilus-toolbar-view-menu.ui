@@ -112,6 +112,10 @@
         <attribute name="action">win.inspector-visible</attribute>
         <attribute name="label" translatable="yes">_Inspector</attribute>
       </item>
+      <item>
+        <attribute name="action">win.bottom-bar</attribute>
+        <attribute name="label" translatable="yes">_Bottom Bar</attribute>
+      </item>
     </section>
   </menu>
 </interface>

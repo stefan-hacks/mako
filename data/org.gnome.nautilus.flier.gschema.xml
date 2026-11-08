@@ -68,6 +68,11 @@
       <summary>Show the inspector</summary>
       <description>Show a panel with a preview and the details of the selected item.</description>
     </key>
+    <key type="b" name="bottom-bar">
+      <default>true</default>
+      <summary>Bottom bar</summary>
+      <description>Show a bar under each tab with the views, a filter, search and the view menu, instead of search and the view menu in the header bar.</description>
+    </key>
     <key name="inspector-side" enum="org.gnome.nautilus.flier.InspectorSide">
       <default>'right'</default>
       <summary>Inspector side</summary>

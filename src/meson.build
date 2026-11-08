@@ -83,6 +83,8 @@ libnautilus_sources = [
   'nautilus-error-reporting.h',
   'nautilus-fd-holder.c',
   'nautilus-fd-holder.h',
+  'nautilus-bottom-bar.c',
+  'nautilus-bottom-bar.h',
   'nautilus-columns.c',
   'nautilus-columns.h',
   'nautilus-file.c',

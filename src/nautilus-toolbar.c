@@ -30,6 +30,8 @@
 #include "nautilus-global-preferences.h"
 #include "nautilus-history-controls.h"
 #include "nautilus-location-entry.h"
+#include "nautilus-bottom-bar.h"
+#include "nautilus-labels.h"
 #include "nautilus-pathbar.h"
 #include "nautilus-view-controls.h"
 #include "nautilus-ui-utilities.h"
@@ -48,6 +50,7 @@ struct _NautilusToolbar
     GtkWidget *path_bar;
     GtkWidget *location_entry;
     GtkWidget *search_button_stack;
+    GtkWidget *view_controls;
     GtkWidget *search_button;
     GtkWidget *search_button_placeholder;
 
@@ -93,7 +96,13 @@ toolbar_update_appearance (NautilusToolbar *self)
                           g_settings_get_boolean (nautilus_preferences,
                                                   NAUTILUS_PREFERENCES_ALWAYS_USE_LOCATION_ENTRY);
 
-    if (self->window_slot != NULL &&
+    /* Each tab's bottom bar has search and the view menu, when it's on. */
+    gboolean bottom_bar = nautilus_bottom_bar_enabled ();
+
+    gtk_widget_set_visible (self->view_controls, self->show_view_controls && !bottom_bar);
+    gtk_widget_set_visible (self->search_button_stack, !bottom_bar);
+
+    if (self->window_slot != NULL && !bottom_bar &&
         nautilus_window_slot_get_search_visible (self->window_slot))
     {
         gtk_stack_set_visible_child_name (GTK_STACK (self->toolbar_switcher), "search");
@@ -114,6 +123,38 @@ toolbar_update_appearance (NautilusToolbar *self)
                                  search_global ? self->search_button_placeholder : self->search_button);
     gtk_stack_set_visible_child (GTK_STACK (self->history_controls_stack),
                                  search_global ? self->history_controls_placeholder : self->history_controls);
+}
+
+/* The active tab's query editor, unless its bottom bar holds it. */
+static void
+take_query_editor (NautilusToolbar *self)
+{
+    GtkWidget *editor;
+    GtkWidget *parent;
+
+    if (self->window_slot == NULL || nautilus_bottom_bar_enabled ())
+    {
+        return;
+    }
+
+    editor = GTK_WIDGET (nautilus_window_slot_get_query_editor (self->window_slot));
+    parent = gtk_widget_get_parent (editor);
+    if (parent == self->search_container)
+    {
+        return;
+    }
+    if (parent != NULL)
+    {
+        gtk_box_remove (GTK_BOX (parent), editor);
+    }
+    gtk_box_append (GTK_BOX (self->search_container), editor);
+}
+
+static void
+on_bottom_bar_setting (NautilusToolbar *self)
+{
+    take_query_editor (self);
+    toolbar_update_appearance (self);
 }
 
 static void
@@ -261,6 +302,9 @@ nautilus_toolbar_init (NautilusToolbar *self)
 
     gtk_widget_init_template (GTK_WIDGET (self));
 
+    g_signal_connect_object (nautilus_flier_settings (), "changed::bottom-bar",
+                             G_CALLBACK (on_bottom_bar_setting), self, G_CONNECT_SWAPPED);
+
     GtkShortcutController *shortcuts = GTK_SHORTCUT_CONTROLLER (gtk_shortcut_controller_new ());
 
     gtk_shortcut_controller_set_scope (shortcuts, GTK_SHORTCUT_SCOPE_MANAGED);
@@ -405,6 +449,7 @@ nautilus_toolbar_set_property (GObject      *object,
         case PROP_SHOW_VIEW_CONTROLS:
         {
             self->show_view_controls = g_value_get_boolean (value);
+            toolbar_update_appearance (self);
         }
         break;
 
@@ -505,6 +550,7 @@ nautilus_toolbar_class_init (NautilusToolbarClass *klass)
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, path_bar);
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, location_entry);
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, search_button_stack);
+    gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, view_controls);
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, search_button);
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, search_button_placeholder);
 
@@ -610,12 +656,7 @@ nautilus_toolbar_set_window_slot_real (NautilusToolbar    *self,
     }
 
     box_remove_all_children (GTK_BOX (self->search_container));
-
-    if (self->window_slot != NULL)
-    {
-        gtk_box_append (GTK_BOX (self->search_container),
-                        GTK_WIDGET (nautilus_window_slot_get_query_editor (self->window_slot)));
-    }
+    take_query_editor (self);
 
     toolbar_update_appearance (self);
 

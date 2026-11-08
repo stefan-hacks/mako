@@ -97,6 +97,7 @@ static const Command commands[] =
     { SECTION_VIEW, N_("Columns View"), "win.view-mode(uint32 2)", NULL, "<alt>2" },
     { SECTION_VIEW, N_("Grid View"), "win.view-mode(uint32 3)", "<ctrl>2", "<alt>3" },
     { SECTION_VIEW, N_("Flat View"), "win.flat-view", NULL, "<alt>r" },
+    { SECTION_VIEW, N_("Show Bottom Bar"), "win.bottom-bar", NULL, "<alt><shift>b" },
     { SECTION_VIEW, N_("Next View"), "win.view-step(1)", NULL, NULL },
     { SECTION_VIEW, N_("Previous View"), "win.view-step(-1)", NULL, NULL },
     { SECTION_VIEW, N_("Zoom In"), "view.zoom-in", "<ctrl>plus", "<ctrl><alt>w" },

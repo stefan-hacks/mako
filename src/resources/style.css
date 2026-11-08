@@ -443,3 +443,7 @@ nautilus-quick-look, .quick-look { background-color: alpha(black, 0.32); }
   box-shadow: 0 2px 6px alpha(black, 0.2), 0 8px 32px alpha(black, 0.35);
 }
 .quick-look.fullscreen .quick-look-card { margin: 0; border-radius: 0; box-shadow: none; }
+
+/* Each tab's bar under its files. */
+nautilus-bottom-bar { border-top: 1px solid var(--border-color); background-color: var(--headerbar-bg-color); }
+nautilus-bottom-bar > .toolbar { padding: 4px 6px; }
