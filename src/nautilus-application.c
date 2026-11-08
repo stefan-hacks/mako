@@ -218,7 +218,8 @@ nautilus_application_create_window (NautilusApplication *self,
                                  MAX (NAUTILUS_WINDOW_MIN_WIDTH, default_width),
                                  MAX (NAUTILUS_WINDOW_MIN_HEIGHT, default_height));
 
-    if (g_strcmp0 (PROFILE, "") != 0)
+    /* File Flier build: no striped "devel" header, it runs as a daily driver. */
+    if (g_strcmp0 (PROFILE, "") != 0 && g_getenv ("NAUTILUS_DEVEL_STYLE") != NULL)
     {
         gtk_widget_add_css_class (GTK_WIDGET (window), "devel");
     }
