@@ -66,6 +66,7 @@
 #include "nautilus-new-folder-dialog.h"
 #include "nautilus-query.h"
 #include "nautilus-previewer.h"
+#include "nautilus-quick-look.h"
 #include "nautilus-program-choosing.h"
 #include "nautilus-properties.h"
 #include "nautilus-recent-servers.h"
@@ -1223,6 +1224,13 @@ nautilus_files_view_preview_update (NautilusFilesView *view)
 {
     g_autolist (NautilusFile) selection = NULL;
 
+    if (view->active && nautilus_quick_look_is_visible ())
+    {
+        selection = nautilus_files_view_get_selection (view);
+        nautilus_quick_look_update (view, selection);
+        return;
+    }
+
     if (!view->active ||
         !nautilus_previewer_is_visible ())
     {
@@ -1746,6 +1754,12 @@ action_preview_selection (GSimpleAction *action,
     g_autolist (NautilusFile) selection = NULL;
 
     selection = nautilus_files_view_get_selection (self);
+
+    if (nautilus_quick_look_enabled ())
+    {
+        nautilus_quick_look_toggle (self, selection);
+        return;
+    }
 
     g_autofree gchar *uri = nautilus_file_get_uri (selection->data);
 
