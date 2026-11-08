@@ -224,6 +224,16 @@ apply_columns_settings (NautilusListView  *self,
 
     view_columns = g_list_reverse (view_columns);
 
+    /* GTK leaves the group headers' cells behind when columns change under
+     * them, and crashes later on: no headers while the columns change. */
+    g_autoptr (GtkListItemFactory) header_factory = gtk_column_view_get_header_factory (self->view_ui);
+
+    if (header_factory != NULL)
+    {
+        g_object_ref (header_factory);
+        gtk_column_view_set_header_factory (self->view_ui, NULL);
+    }
+
     /* hide columns that are not present in the configuration */
     for (guint i = 0; i < g_list_model_get_n_items (old_view_columns); i++)
     {
@@ -244,6 +254,11 @@ apply_columns_settings (NautilusListView  *self,
     for (GList *l = view_columns; l != NULL; l = l->next, column_i++)
     {
         gtk_column_view_insert_column (self->view_ui, column_i, l->data);
+    }
+
+    if (header_factory != NULL)
+    {
+        gtk_column_view_set_header_factory (self->view_ui, header_factory);
     }
 }
 
