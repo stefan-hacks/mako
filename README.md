@@ -1,40 +1,212 @@
-# nautilus
-[![Pipeline status](https://gitlab.gnome.org/GNOME/nautilus/badges/main/pipeline.svg)](https://gitlab.gnome.org/GNOME/nautilus/commits/main)
-[![coverage report](https://gitlab.gnome.org/GNOME/nautilus/badges/main/coverage.svg)](https://gitlab.gnome.org/GNOME/nautilus/commits/main) 
+# Files Flier
 
-This is the project of the [Files](https://apps.gnome.org/Nautilus/) app, a file browser for
-GNOME, internally known by its historical name `nautilus`.
+**A fast, hotkey-first fork of GNOME Files (Nautilus).**
+Split panes with their own tabs, Miller columns, a multi-file Quick Look,
+ratings and tags, and a keyboard layout built so that one hand can do
+everything while the other stays on the mouse.
 
-## Supported version
-Only the latest version of Files as provided upstream is supported. Try out the [Flatpak nightly](https://welcome.gnome.org/en/app/Nautilus/#installing-a-nightly-build) installation before filling issues to ensure the installation is reproducible and doesn't have downstream changes on it. In case you cannot reproduce in the nightly installation, don't hesitate to file an issue in your distribution. This is to ensure the issue is well triaged and reaches the proper people.
+It keeps the native GNOME look (GTK 4 and libadwaita) and stays close to
+upstream, so it is easy to follow new Nautilus releases. It is based on
+Nautilus **50.2.2**.
 
-## Runtime dependencies
-- [Bubblewrap](https://github.com/containers/bubblewrap) installed. Used for security reasons.
-- [LocalSearch](https://gitlab.gnome.org/GNOME/localsearch) properly set up and with all features enabled. Used for fast search and metadata extraction, starred files and batch renaming.
-- [xdg-user-dirs-gtk](https://gitlab.gnome.org/GNOME/xdg-user-dirs-gtk) installed.  Used to create the default bookmarks and update localization.
+![Files Flier with the inspector open](docs/media/hero.png)
 
-## Discourse
+> Files Flier is a personal fork. It is not made or supported by the GNOME
+> project. Please report problems here, not to GNOME.
 
-For more informal discussion we use [GNOME Discourse](https://discourse.gnome.org/tags/nautilus) in the Applications category with the `nautilus` tag. Feel free to open a topic there.
+---
 
-## Extensions
+## Contents
 
-Documentation for the libnautilus-extension API is available [here](https://gnome.pages.gitlab.gnome.org/nautilus/).  Also, if you are interested in developing a Nautilus extension in Python you should refer to the [nautilus-python](https://gnome.pages.gitlab.gnome.org/nautilus-python/) documentation.
+- [Highlights](#highlights)
+- [Views](#views)
+- [Tiles and tabs](#tiles-and-tabs)
+- [Quick Look](#quick-look)
+- [Sidebar](#sidebar)
+- [Ratings, tags and colors](#ratings-tags-and-colors)
+- [Keyboard: one hand on the keys](#keyboard-one-hand-on-the-keys)
+- [Settings](#settings)
+- [Build and install](#build-and-install)
+- [Status](#status)
+- [License](#license)
 
-## How to report issues
+## Highlights
 
-Report issues to the GNOME [issue tracking system](https://gitlab.gnome.org/GNOME/nautilus/issues).
+| | |
+|---|---|
+| **Four views** | List, tree, Miller columns and grid. `Alt+1` to `Alt+4` switch between them. |
+| **Tiles** | Split the window into panes, each with its own tab bar. `Ctrl+Tab` goes through every tab of every tile. |
+| **Quick Look** | `Space` previews many files at once on a zoomable canvas. Rate, play videos frame by frame and read text files. |
+| **Inspector** | A side panel with the preview, rating, tags and details of the selection. It can sit on any side. |
+| **Ratings and tags** | Stored on the files as extended attributes, the same ones Dolphin uses (`user.baloo.rating`, `user.xdg.tags`). |
+| **Sidebar** | Groups you can fold and reorder (Bookmarks, Places, Recent, Tags, Storage). Every item can get a color. |
+| **Commands** | `F1` or `Ctrl+K` opens a searchable list of every command, and any key can be changed there. |
+| **Key hints** | Each shortcut you press briefly shows its name at the bottom of the window, which helps you learn them. Tooltips show keys too. |
+| **Bottom bar** | Filter as you type, search, sort and group, flat view, and the view switcher, all in one bar under each tab. |
 
-## Feature requests
+## Views
 
-Files is a core compoment of the GNOME desktop experience. As such, any changes in behavior or appearance only happen in accordance with the [GNOME design team][design-team].
+List, tree, columns and grid are one key away, and every tab remembers its
+own view. In the grid, holding `Alt` shows the star ratings so you can click
+to rate.
 
-For major changes, it is best to start a discussion on [discourse] and reach out on the [#gnome-design matrix room][design-room], and only involve the issue tracker once agreement has been reached.
+![Switching views and panels with Alt keys](docs/media/keys.gif)
 
-In particular mockups must be approved by the design team to be considered for implementation.
+**Miller columns** work like Finder's: the columns share the width equally.
+The right column shows the selected folder's contents or the selected
+file's details. One click reveals an item, a double click goes into it.
 
-For enhancements that are limited in scope and well-defined, it is acceptable to directly open an issue using the shortcoming template.
+![Miller columns](docs/media/columns.png)
 
-[design-team]: https://gitlab.gnome.org/Teams/Design
-[discourse]: https://discourse.gnome.org/tag/nautilus
-[design-room]: https://matrix.to/#/#gnome-design:gnome.org
+**Grouping:** `Ctrl+G` steps through grouping by date, first letter,
+rating and kind. **Flat view:** `Alt+R` lists every file in all subfolders.
+
+![List grouped by rating](docs/media/list.png)
+
+## Tiles and tabs
+
+`F3` splits to the right and `Shift+F3` splits down. Each tile has its own
+tabs, and the active tab is filled with the accent color. `Alt+T` moves to
+the next tile, and `Ctrl+Tab` goes through all tabs in all tiles.
+
+![Splitting into tiles with tabs](docs/media/tiles.gif)
+
+## Quick Look
+
+Select files and press `Space`. Several files open on one canvas: zoom with
+`W` and `S`, fit with `Q`, see real size with `Z`, rate with `1` to `5` and
+step with `A` and `D`. Videos play with `K`, `J` and `L`, and `Shift+A` and
+`Shift+D` (or `,` and `.`) step one frame at a time. Text files such as txt,
+json, yaml and code are shown as text. The keys are listed at the bottom of
+the panel.
+
+![Quick Look on several photos](docs/media/quicklook.gif)
+
+## Sidebar
+
+The sidebar is made of groups you can fold. Drag a group's header (or
+right-click it) to move it, and switch groups and single places on or off
+in Preferences. Downloads, Documents, Pictures and Videos sit in Places.
+Right-click any item to color its icon.
+
+Walk the sidebar from the keyboard with `Ctrl+↑` and `Ctrl+↓`. Group
+headers are stops too, so this works even when every group is folded.
+`Ctrl+←` and `Ctrl+→` fold and unfold the group you're in.
+
+![Walking and folding the sidebar from the keyboard](docs/media/sidebar.gif)
+
+## Ratings, tags and colors
+
+- **Ratings:** 0 to 5 stars. `Ctrl+Alt+1` to `Ctrl+Alt+5` rate the selection, and `` Ctrl+Alt+` `` clears it.
+- **Tags:** colored dots next to names, a tag column in the list, and a Tags group in the sidebar. Clicking a tag finds every file with it. `Ctrl+Alt+A` edits the selection's tags.
+- **Folder colors:** eight colors in five schemes, from the right-click menu. The rainbow option gives each selected folder the next color.
+
+Ratings and tags are written to the files themselves (extended attributes),
+so they move with the files and other apps such as Dolphin can read them.
+Tag names and colors are kept in `~/.config/nautilus/tags.json`.
+
+## Keyboard: one hand on the keys
+
+Every common command has a key on the left side of the keyboard, so you can
+keep your right hand on the mouse. GNOME's usual keys still work as well.
+The layout follows a few simple rules:
+
+- **`Alt` + WASD moves:** `W` goes up, `A` back, `D` forward, `S` opens (goes in). `Q` goes home.
+- **`Alt` + a letter toggles panels and views:** `B` the sidebar ("bar"), `E` the inspector ("examine"), `R` the flat view ("recursive"), `V` hidden files ("visible"). `1` to `4` pick the view.
+- **`Shift` gives the stronger version:** `Alt+S` opens and `Alt+Shift+S` opens in a new tab. `Alt+X` moves to the trash and `Alt+Shift+X` deletes. `Alt+E` shows the inspector and `Alt+Shift+E` moves it to the next side. `Alt+Shift+B` toggles the bottom bar.
+- **`Ctrl+Alt` + a key marks files:** numbers rate, `A` edits tags.
+- **`Ctrl` + arrows walk the sidebar.**
+
+<table>
+<tr><th>Navigate</th><th>Key</th><th>Panels and views</th><th>Key</th></tr>
+<tr><td>Back / Forward</td><td><kbd>Alt</kbd>+<kbd>A</kbd> / <kbd>Alt</kbd>+<kbd>D</kbd></td><td>List / Tree / Columns / Grid</td><td><kbd>Alt</kbd>+<kbd>1</kbd> … <kbd>4</kbd></td></tr>
+<tr><td>Parent folder</td><td><kbd>Alt</kbd>+<kbd>W</kbd></td><td>Sidebar</td><td><kbd>Alt</kbd>+<kbd>B</kbd> (<kbd>F9</kbd>)</td></tr>
+<tr><td>Open / in new tab</td><td><kbd>Alt</kbd>+<kbd>S</kbd> / <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>Inspector / move it</td><td><kbd>Alt</kbd>+<kbd>E</kbd> / <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> (<kbd>F4</kbd>)</td></tr>
+<tr><td>Home folder</td><td><kbd>Alt</kbd>+<kbd>Q</kbd></td><td>Bottom bar</td><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd></td></tr>
+<tr><td>Enter a location</td><td><kbd>Ctrl</kbd>+<kbd>E</kbd> (<kbd>Ctrl</kbd>+<kbd>L</kbd>)</td><td>Flat view</td><td><kbd>Alt</kbd>+<kbd>R</kbd></td></tr>
+<tr><td>Search here / everywhere</td><td><kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td><td>Hidden files</td><td><kbd>Alt</kbd>+<kbd>V</kbd></td></tr>
+<tr><td>Sidebar up / down</td><td><kbd>Ctrl</kbd>+<kbd>↑</kbd> / <kbd>Ctrl</kbd>+<kbd>↓</kbd></td><td>Next grouping</td><td><kbd>Ctrl</kbd>+<kbd>G</kbd></td></tr>
+<tr><td>Fold / unfold group</td><td><kbd>Ctrl</kbd>+<kbd>←</kbd> / <kbd>Ctrl</kbd>+<kbd>→</kbd></td><td>Zoom in / out</td><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> / <kbd>S</kbd></td></tr>
+<tr><th>Edit</th><th>Key</th><th>Tabs and tiles</th><th>Key</th></tr>
+<tr><td>Quick Look</td><td><kbd>Space</kbd></td><td>New / close tab</td><td><kbd>Ctrl</kbd>+<kbd>T</kbd> / <kbd>Ctrl</kbd>+<kbd>W</kbd></td></tr>
+<tr><td>Properties ("get info")</td><td><kbd>Alt</kbd>+<kbd>G</kbd></td><td>Next / previous tab (all tiles)</td><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></td></tr>
+<tr><td>Move to trash / delete</td><td><kbd>Alt</kbd>+<kbd>X</kbd> / <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd></td><td>Reopen closed tab</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></td></tr>
+<tr><td>Rename</td><td><kbd>F2</kbd></td><td>Split right / down</td><td><kbd>F3</kbd> / <kbd>Shift</kbd>+<kbd>F3</kbd></td></tr>
+<tr><td>New folder</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd></td><td>Next / previous tile</td><td><kbd>Alt</kbd>+<kbd>T</kbd> / <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></td></tr>
+<tr><td>Invert selection</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></td><td>Reload</td><td><kbd>Ctrl</kbd>+<kbd>R</kbd> (<kbd>F5</kbd>)</td></tr>
+<tr><th>Rate and tag</th><th>Key</th><th>App</th><th>Key</th></tr>
+<tr><td>Rate 1 to 5 stars / clear</td><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd> … <kbd>5</kbd> / <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>`</kbd></td><td>Commands and shortcuts</td><td><kbd>F1</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd></td></tr>
+<tr><td>Edit tags</td><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd></td><td>Preferences</td><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td></tr>
+</table>
+
+Keys in brackets are GNOME's own keys, which keep working. Every key can
+be changed in the command list (`F1`): search for a command, click its key
+and press a new one.
+
+![The command list with every key](docs/media/shortcuts.png)
+
+## Settings
+
+Most of what Files Flier adds can be switched in **Preferences →
+Organize**: ratings, tags, folder colors and their scheme, the built-in
+Quick Look, shortcut hints, keys in menus, sidebar groups and which
+sections and places the sidebar shows.
+
+The settings live in the GSettings schema `org.gnome.nautilus.flier`, so
+they never touch your normal Nautilus settings.
+
+## Build and install
+
+You need the build dependencies of Nautilus 50, with **GTK 4.22** and
+**libadwaita 1.9** or newer. On Debian or Ubuntu,
+`sudo apt build-dep nautilus` gets most of them, plus `blueprint-compiler`
+and `gettext`.
+
+```sh
+git clone https://github.com/tommkotzu/nautilus-flier.git
+cd nautilus-flier
+meson setup _build --buildtype=debugoptimized --prefix="$HOME/.local/nautilus-ff"
+ninja -C _build
+meson install -C _build
+```
+
+The app id is `org.gnome.Nautilus.Devel`, so it installs next to the
+regular Files app without replacing it. To run it from that prefix:
+
+```sh
+#!/bin/sh
+# ~/.local/bin/nautilus-flier
+P="$HOME/.local/nautilus-ff"
+export GSETTINGS_SCHEMA_DIR="$P/share/glib-2.0/schemas"
+export XDG_DATA_DIRS="$P/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export LD_LIBRARY_PATH="$P/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
+exec "$P/bin/nautilus" "$@"
+```
+
+To make it your default file manager:
+
+```sh
+xdg-mime default org.gnome.Nautilus.Devel.desktop inode/directory
+```
+
+Undo it with `xdg-mime default org.gnome.Nautilus.desktop inode/directory`.
+
+## Status
+
+Files Flier is used daily, but it is young. All changes are on the
+`ff/split-panes` branch, one commit per feature, on top of Nautilus
+50.2.2. New code goes into its own files where possible (for example
+`nautilus-shortcuts.c`, `nautilus-quick-look.c`, `nautilus-columns.c`,
+`nautilus-labels.c`, `nautilus-inspector.c`, `nautilus-bottom-bar.c` and
+`nautilus-tile-layout.c`), which keeps following upstream easy.
+
+Many ideas come from [File Flier](https://github.com/andrew11155/FileFlier),
+a file manager written in Rust.
+
+The README pictures were taken from inside the app (run with
+`FLIER_CAPTURE=1`) in a demo home folder.
+
+## License
+
+GPL-3.0-or-later, like Nautilus. See [LICENSE](LICENSE). GNOME's original
+README is in [README.nautilus.md](README.nautilus.md).
