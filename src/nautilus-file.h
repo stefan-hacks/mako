@@ -337,6 +337,8 @@ gboolean                nautilus_file_is_not_yet_confirmed              (Nautilu
 /* Ratings (0-5 stars) and tags. Change them with nautilus-labels.h. */
 guint                   nautilus_file_get_rating                        (NautilusFile                   *file);
 const char * const *    nautilus_file_get_tags                          (NautilusFile                   *file);
+/* The tags in a raw xattr::xdg.tags value, or NULL. */
+GStrv                   nautilus_file_tags_from_xattr                   (const char                     *raw);
 gboolean                nautilus_file_has_tag                           (NautilusFile                   *file,
 									 const char                     *tag);
 void                    nautilus_file_set_marks_cached                  (NautilusFile                   *file,

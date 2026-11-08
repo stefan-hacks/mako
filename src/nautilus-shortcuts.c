@@ -100,6 +100,7 @@ static const Command commands[] =
     { SECTION_VIEW, N_("Flat View"), "win.flat-view", NULL, "<alt>r" },
     { SECTION_VIEW, N_("Show Bottom Bar"), "win.bottom-bar", NULL, "<alt><shift>b" },
     { SECTION_VIEW, N_("Show Shortcut Hints"), "win.shortcut-hints", NULL, NULL },
+    { SECTION_VIEW, N_("Sidebar Groups"), "win.sidebar-groups", NULL, NULL },
     { SECTION_VIEW, N_("Next View"), "win.view-step(1)", NULL, NULL },
     { SECTION_VIEW, N_("Previous View"), "win.view-step(-1)", NULL, NULL },
     { SECTION_VIEW, N_("Zoom In"), "view.zoom-in", "<ctrl>plus", "<ctrl><alt>w" },

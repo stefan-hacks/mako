@@ -32,6 +32,7 @@
 #include "nautilus-file-operations.h"
 #include "nautilus-file-utilities.h"
 #include "nautilus-global-preferences.h"
+#include "nautilus-labels.h"
 #include "nautilus-properties.h"
 #include "nautilus-scheme.h"
 #include "nautilus-sidebar-row.h"
@@ -324,6 +325,328 @@ emit_drag_perform_drop (NautilusSidebar *sidebar,
     g_signal_emit (sidebar, places_sidebar_signals[DRAG_PERFORM_DROP], 0,
                    dest_file, source_file_list, action);
 }
+/* ------------------------------------------------------------ Groups */
+
+static void update_places (NautilusSidebar *sidebar);
+static gboolean should_show_recent (NautilusSidebar *sidebar);
+static char *get_home_directory_uri (void);
+
+/* With the "sidebar-groups" setting, each section gets a header that folds
+ * it away, like File Flier's sidebar, and Recent and Starred get groups of
+ * their own. Tags are a section either way. */
+
+#define MAX_RECENT_FOLDERS 8
+
+static gboolean
+groups_on (void)
+{
+    return g_settings_get_boolean (nautilus_flier_settings (), "sidebar-groups");
+}
+
+static const char *
+group_id (NautilusSidebarSectionType section)
+{
+    switch (section)
+    {
+        case NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS: return "places";
+        case NAUTILUS_SIDEBAR_SECTION_RECENT: return "recent";
+        case NAUTILUS_SIDEBAR_SECTION_STARRED: return "starred";
+        case NAUTILUS_SIDEBAR_SECTION_BOOKMARKS: return "bookmarks";
+        case NAUTILUS_SIDEBAR_SECTION_TAGS: return "tags";
+        case NAUTILUS_SIDEBAR_SECTION_CLOUD: return "cloud";
+        case NAUTILUS_SIDEBAR_SECTION_MOUNTS: return "devices";
+        default: return NULL;
+    }
+}
+
+static const char *
+group_title (NautilusSidebarSectionType section)
+{
+    switch (section)
+    {
+        case NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS: return _("Places");
+        case NAUTILUS_SIDEBAR_SECTION_RECENT: return _("Recent");
+        case NAUTILUS_SIDEBAR_SECTION_STARRED: return _("Starred");
+        case NAUTILUS_SIDEBAR_SECTION_BOOKMARKS: return _("Bookmarks");
+        case NAUTILUS_SIDEBAR_SECTION_TAGS: return _("Tags");
+        case NAUTILUS_SIDEBAR_SECTION_CLOUD: return _("Cloud");
+        case NAUTILUS_SIDEBAR_SECTION_MOUNTS: return _("Devices");
+        default: return "";
+    }
+}
+
+static gboolean
+group_collapsed (NautilusSidebarSectionType section)
+{
+    g_auto (GStrv) collapsed = g_settings_get_strv (nautilus_flier_settings (), "sidebar-collapsed");
+    const char *id = group_id (section);
+
+    return id != NULL && g_strv_contains ((const char * const *) collapsed, id);
+}
+
+static void
+toggle_group (NautilusSidebarSectionType section)
+{
+    g_auto (GStrv) collapsed = g_settings_get_strv (nautilus_flier_settings (), "sidebar-collapsed");
+    g_autoptr (GStrvBuilder) builder = g_strv_builder_new ();
+    const char *id = group_id (section);
+    gboolean was = FALSE;
+
+    for (guint i = 0; collapsed[i] != NULL; i++)
+    {
+        if (g_strcmp0 (collapsed[i], id) == 0)
+        {
+            was = TRUE;
+        }
+        else
+        {
+            g_strv_builder_add (builder, collapsed[i]);
+        }
+    }
+    if (!was && id != NULL)
+    {
+        g_strv_builder_add (builder, id);
+    }
+
+    g_auto (GStrv) result = g_strv_builder_end (builder);
+    g_settings_set_strv (nautilus_flier_settings (), "sidebar-collapsed", (const char * const *) result);
+}
+
+static gboolean
+list_box_filter_func (GtkListBoxRow *row,
+                      gpointer       user_data)
+{
+    NautilusSidebarSectionType section;
+    NautilusSidebarRowType place_type;
+
+    if (!NAUTILUS_IS_SIDEBAR_ROW (row) || !groups_on ())
+    {
+        return TRUE;
+    }
+    g_object_get (row, "section-type", &section, "place-type", &place_type, NULL);
+
+    return place_type == NAUTILUS_SIDEBAR_ROW_GROUP_HEADER || !group_collapsed (section);
+}
+
+static void
+update_group_arrows (NautilusSidebar *sidebar)
+{
+    for (GtkWidget *child = gtk_widget_get_first_child (sidebar->list_box); child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        NautilusSidebarSectionType section;
+        NautilusSidebarRowType place_type;
+
+        if (!NAUTILUS_IS_SIDEBAR_ROW (child))
+        {
+            continue;
+        }
+        g_object_get (child, "section-type", &section, "place-type", &place_type, NULL);
+        if (place_type == NAUTILUS_SIDEBAR_ROW_GROUP_HEADER)
+        {
+            g_autoptr (GIcon) arrow = g_themed_icon_new (group_collapsed (section) ? "pan-end-symbolic"
+                                                                                : "pan-down-symbolic");
+
+            nautilus_sidebar_row_set_end_icon (NAUTILUS_SIDEBAR_ROW (child), arrow);
+        }
+    }
+}
+
+static void
+on_collapsed_changed (NautilusSidebar *sidebar)
+{
+    update_group_arrows (sidebar);
+    gtk_list_box_invalidate_filter (GTK_LIST_BOX (sidebar->list_box));
+}
+
+/* Colors for the tag dots: one rule per tag row. */
+static void
+update_tag_css (GString *css)
+{
+    static GtkCssProvider *provider = NULL;
+
+    if (provider == NULL)
+    {
+        provider = gtk_css_provider_new ();
+        gtk_style_context_add_provider_for_display (gdk_display_get_default (), GTK_STYLE_PROVIDER (provider),
+                                                    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+    gtk_css_provider_load_from_string (provider, css->str);
+}
+
+static void
+on_recent_changed (NautilusSidebar *sidebar)
+{
+    if (groups_on ())
+    {
+        update_places (sidebar);
+    }
+}
+
+static void
+on_tags_changed (NautilusSidebar *sidebar)
+{
+    update_places (sidebar);
+}
+
+static void
+on_tag_row_activated (NautilusSidebar    *sidebar,
+                      NautilusSidebarRow *row)
+{
+    g_autofree char *label = NULL;
+
+    g_object_get (row, "label", &label, NULL);
+    gtk_widget_activate_action (GTK_WIDGET (sidebar), "win.show-tag", "s", label);
+}
+
+static GtkWidget *add_place (NautilusSidebar *sidebar, NautilusSidebarRowType place_type,
+                             NautilusSidebarSectionType section_type, const char *name,
+                             GIcon *start_icon, GIcon *end_icon, const char *uri, GDrive *drive,
+                             GVolume *volume, GMount *mount,
+#ifdef HAVE_CLOUDPROVIDERS
+                             CloudProvidersAccount *cloud_provider_account,
+#else
+                             gpointer *cloud_provider_account,
+#endif
+                             const int index, const char *tooltip);
+
+static int
+compare_recent_newest (GtkRecentInfo *a,
+                       GtkRecentInfo *b)
+{
+    GDateTime *ta = gtk_recent_info_get_modified (a);
+    GDateTime *tb = gtk_recent_info_get_modified (b);
+
+    return -g_date_time_compare (ta, tb);
+}
+
+/* Folders of recently used files, newest first. */
+static void
+add_recent_folders (NautilusSidebar *sidebar)
+{
+    GList *items = gtk_recent_manager_get_items (gtk_recent_manager_get_default ());
+    g_autoptr (GHashTable) seen = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    g_autoptr (GPtrArray) sorted = g_ptr_array_new ();
+    g_autoptr (GIcon) icon = g_themed_icon_new ("folder-symbolic");
+    g_autofree char *home = get_home_directory_uri ();
+    int n = 0;
+
+    for (GList *l = items; l != NULL; l = l->next)
+    {
+        g_ptr_array_add (sorted, l->data);
+    }
+    g_ptr_array_sort_values (sorted, (GCompareFunc) compare_recent_newest);
+
+    for (guint i = 0; i < sorted->len && n < MAX_RECENT_FOLDERS; i++)
+    {
+        GtkRecentInfo *info = g_ptr_array_index (sorted, i);
+        g_autoptr (GFile) file = NULL;
+        g_autoptr (GFile) parent = NULL;
+        g_autofree char *uri = NULL;
+        g_autofree char *name = NULL;
+        g_autofree char *path = NULL;
+
+        if (!gtk_recent_info_is_local (info) || !gtk_recent_info_exists (info))
+        {
+            continue;
+        }
+        file = g_file_new_for_uri (gtk_recent_info_get_uri (info));
+        parent = g_file_get_parent (file);
+        if (parent == NULL)
+        {
+            continue;
+        }
+        uri = g_file_get_uri (parent);
+        if (g_hash_table_contains (seen, uri) || g_strcmp0 (uri, home) == 0)
+        {
+            continue;
+        }
+        g_hash_table_add (seen, g_strdup (uri));
+        name = g_file_get_basename (parent);
+        path = g_file_get_path (parent);
+        add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN, NAUTILUS_SIDEBAR_SECTION_RECENT,
+                   name, icon, NULL, uri, NULL, NULL, NULL, NULL, ++n, path);
+    }
+
+    g_list_free_full (items, (GDestroyNotify) gtk_recent_info_unref);
+}
+
+/* The tags, a colored dot each; opening one lists its files. */
+static void
+add_tags (NautilusSidebar *sidebar)
+{
+    g_autoptr (GString) css = g_string_new (NULL);
+    g_autoptr (GIcon) dot = g_themed_icon_new ("media-record-symbolic");
+    guint n = nautilus_labels_get_n_tags ();
+
+    for (guint i = 0; i < n; i++)
+    {
+        const char *tag = nautilus_labels_get_tag_name (i);
+        g_autofree char *tooltip = g_strdup_printf (_("Files Tagged “%s”"), tag);
+        g_autofree char *class = g_strdup_printf ("sidebar-tag-%u", i);
+        g_autofree char *color = NULL;
+        GdkRGBA rgba;
+        GtkWidget *row;
+
+        row = add_place (sidebar, NAUTILUS_SIDEBAR_ROW_TAG, NAUTILUS_SIDEBAR_SECTION_TAGS,
+                         tag, dot, NULL, NULL, NULL, NULL, NULL, NULL, (int) i, tooltip);
+        gtk_widget_add_css_class (row, class);
+        nautilus_labels_get_tag_color (tag, &rgba);
+        color = gdk_rgba_to_string (&rgba);
+        g_string_append_printf (css, ".%s image.sidebar-icon { color: %s; }\n", class, color);
+    }
+    update_tag_css (css);
+}
+
+static void
+add_flier_rows (NautilusSidebar *sidebar)
+{
+    gboolean present[NAUTILUS_SIDEBAR_N_SECTION_TYPES] = { FALSE };
+
+    if (groups_on () && should_show_recent (sidebar))
+    {
+        add_recent_folders (sidebar);
+    }
+    add_tags (sidebar);
+
+    if (!groups_on ())
+    {
+        return;
+    }
+
+    for (GtkWidget *child = gtk_widget_get_first_child (sidebar->list_box); child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        NautilusSidebarSectionType section;
+        NautilusSidebarRowType place_type;
+
+        if (NAUTILUS_IS_SIDEBAR_ROW (child))
+        {
+            g_object_get (child, "section-type", &section, "place-type", &place_type, NULL);
+            /* The hidden new-bookmark row alone doesn't make a group. */
+            if (place_type != NAUTILUS_SIDEBAR_ROW_NEW_BOOKMARK && section < NAUTILUS_SIDEBAR_N_SECTION_TYPES)
+            {
+                present[section] = TRUE;
+            }
+        }
+    }
+
+    for (int section = NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS; section < NAUTILUS_SIDEBAR_N_SECTION_TYPES;
+         section++)
+    {
+        if (present[section])
+        {
+            GtkWidget *header = add_place (sidebar, NAUTILUS_SIDEBAR_ROW_GROUP_HEADER, section,
+                                           group_title (section), NULL, NULL, NULL, NULL, NULL, NULL,
+                                           NULL, 0, NULL);
+
+            gtk_widget_add_css_class (header, "sidebar-group-header");
+            gtk_list_box_row_set_selectable (GTK_LIST_BOX_ROW (header), FALSE);
+        }
+    }
+    update_group_arrows (sidebar);
+}
+
 static void
 list_box_header_func (GtkListBoxRow *row,
                       GtkListBoxRow *before,
@@ -345,7 +668,7 @@ list_box_header_func (GtkListBoxRow *row,
         before_section_type = NAUTILUS_SIDEBAR_SECTION_INVALID;
     }
 
-    if (before && before_section_type != row_section_type)
+    if (before && before_section_type != row_section_type && !groups_on ())
     {
         separator = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
         gtk_list_box_row_set_header (row, separator);
@@ -705,7 +1028,7 @@ update_places (NautilusSidebar *sidebar)
     {
         start_icon = g_themed_icon_new_with_default_fallbacks ("document-open-recent-symbolic");
         add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
-                   NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
+                   groups_on () ? NAUTILUS_SIDEBAR_SECTION_RECENT : NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
                    _("Recent"), start_icon, NULL, SCHEME_RECENT ":///",
                    NULL, NULL, NULL, NULL, 0,
                    _("Recent Files"));
@@ -714,7 +1037,7 @@ update_places (NautilusSidebar *sidebar)
 
     start_icon = g_themed_icon_new_with_default_fallbacks ("starred-symbolic");
     add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
-               NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
+               groups_on () ? NAUTILUS_SIDEBAR_SECTION_STARRED : NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
                _("Starred"), start_icon, NULL, SCHEME_STARRED ":///",
                NULL, NULL, NULL, NULL, 0,
                _("Starred Files"));
@@ -1104,6 +1427,8 @@ update_places (NautilusSidebar *sidebar)
 
     /* We want this hidden by default, but need to do it after the show_all call */
     nautilus_sidebar_row_hide (NAUTILUS_SIDEBAR_ROW (sidebar->new_bookmark_row), TRUE);
+
+    add_flier_rows (sidebar);
 
     /* restore original selection */
     if (original_uri)
@@ -3182,6 +3507,21 @@ on_row_activated (GtkListBox    *list_box,
         return;
     }
 
+    NautilusSidebarRowType place_type;
+    NautilusSidebarSectionType section;
+
+    g_object_get (row, "place-type", &place_type, "section-type", &section, NULL);
+    if (place_type == NAUTILUS_SIDEBAR_ROW_GROUP_HEADER)
+    {
+        toggle_group (section);
+        return;
+    }
+    if (place_type == NAUTILUS_SIDEBAR_ROW_TAG)
+    {
+        on_tag_row_activated (NAUTILUS_PLACES_SIDEBAR (user_data), NAUTILUS_SIDEBAR_ROW (row));
+        return;
+    }
+
     selected_row = NAUTILUS_SIDEBAR_ROW (gtk_list_box_get_selected_row (list_box));
     open_row (selected_row, 0);
 }
@@ -3246,7 +3586,13 @@ on_row_released (GtkGestureClick    *gesture,
         }
         else if (button == 3)
         {
-            show_row_popover (NAUTILUS_SIDEBAR_ROW (row), x, y);
+            NautilusSidebarRowType place_type;
+
+            g_object_get (row, "place-type", &place_type, NULL);
+            if (place_type != NAUTILUS_SIDEBAR_ROW_GROUP_HEADER && place_type != NAUTILUS_SIDEBAR_ROW_TAG)
+            {
+                show_row_popover (NAUTILUS_SIDEBAR_ROW (row), x, y);
+            }
         }
     }
 }
@@ -3609,6 +3955,16 @@ nautilus_sidebar_init (NautilusSidebar *sidebar)
                                   list_box_header_func, sidebar, NULL);
     gtk_list_box_set_sort_func (GTK_LIST_BOX (sidebar->list_box),
                                 list_box_sort_func, NULL, NULL);
+    gtk_list_box_set_filter_func (GTK_LIST_BOX (sidebar->list_box),
+                                  list_box_filter_func, sidebar, NULL);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-collapsed",
+                             G_CALLBACK (on_collapsed_changed), sidebar, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-groups",
+                             G_CALLBACK (update_places), sidebar, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_labels_get (), "tags-changed",
+                             G_CALLBACK (on_tags_changed), sidebar, G_CONNECT_SWAPPED);
+    g_signal_connect_object (gtk_recent_manager_get_default (), "changed",
+                             G_CALLBACK (on_recent_changed), sidebar, G_CONNECT_SWAPPED);
     gtk_list_box_set_selection_mode (GTK_LIST_BOX (sidebar->list_box), GTK_SELECTION_SINGLE);
     gtk_list_box_set_activate_on_single_click (GTK_LIST_BOX (sidebar->list_box), TRUE);
     gtk_list_box_set_tab_behavior (GTK_LIST_BOX (sidebar->list_box), GTK_LIST_TAB_ITEM);

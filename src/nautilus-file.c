@@ -2471,6 +2471,19 @@ split_tags (const char *value)
     return any ? g_strv_builder_end (builder) : NULL;
 }
 
+GStrv
+nautilus_file_tags_from_xattr (const char *raw)
+{
+    g_autofree char *unescaped = NULL;
+
+    if (raw == NULL || raw[0] == '\0')
+    {
+        return NULL;
+    }
+    unescaped = unescape_xattr (raw);
+    return split_tags (unescaped);
+}
+
 static gboolean
 strv_equal0 (const char * const *a,
              const char * const *b)

@@ -49,4 +49,8 @@ gboolean   nautilus_columns_get_tree    (NautilusColumns    *self);
 /* Whether the list shows only names (Columns mode). */
 gboolean   nautilus_columns_get_names_only (NautilusColumns *self);
 
+/* Every file under Home with @tag, as a flat view. */
+void       nautilus_columns_show_tag       (NautilusColumns *self,
+                                            const char      *tag);
+
 G_END_DECLS

@@ -78,6 +78,16 @@
       <summary>Bottom bar</summary>
       <description>Show a bar under each tab with the views, a filter, search and the view menu, instead of search and the view menu in the header bar.</description>
     </key>
+    <key type="b" name="sidebar-groups">
+      <default>false</default>
+      <summary>Sidebar groups</summary>
+      <description>Show the sidebar as groups that fold away: Places, Recent, Starred, Bookmarks, Tags, Cloud and Devices.</description>
+    </key>
+    <key type="as" name="sidebar-collapsed">
+      <default>[]</default>
+      <summary>Folded sidebar groups</summary>
+      <description>The sidebar groups that are folded away.</description>
+    </key>
     <key type="b" name="shortcut-hints">
       <default>true</default>
       <summary>Shortcut hints</summary>

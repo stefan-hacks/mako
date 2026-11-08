@@ -511,14 +511,18 @@ static void
 update_prompt (NautilusQueryEditor *editor)
 {
     gboolean flat = editor->query != NULL && nautilus_query_get_flat (editor->query);
+    const char *tag = editor->query != NULL ? nautilus_query_get_tag (editor->query) : NULL;
+    g_autofree char *tagged = tag != NULL ? g_strdup_printf (_("Filter files tagged “%s”"), tag) : NULL;
 
     gtk_image_set_from_icon_name (GTK_IMAGE (editor->prefix_icon),
-                                  (flat ? "view-list-symbolic" :
+                                  (tag != NULL ? "media-record-symbolic" :
+                                   flat ? "view-list-symbolic" :
                                    editor->location != NULL ?
                                    "nautilus-folder-search-symbolic" :
                                    "edit-find-symbolic"));
     gtk_text_set_placeholder_text (GTK_TEXT (editor->text),
-                                   (flat ? _("Filter all files in subfolders") :
+                                   (tagged != NULL ? tagged :
+                                    flat ? _("Filter all files in subfolders") :
                                     editor->location != NULL ?
                                     _("Search current folder") :
                                     _("Search everywhere")));

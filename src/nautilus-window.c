@@ -2283,6 +2283,21 @@ action_flat_view (GSimpleAction *action,
 }
 
 static void
+action_show_tag (GSimpleAction *action,
+                 GVariant      *parameter,
+                 gpointer       user_data)
+{
+    NautilusWindow *window = user_data;
+    NautilusColumns *columns = window->active_slot != NULL ?
+                               NAUTILUS_COLUMNS (nautilus_window_slot_get_columns (window->active_slot)) : NULL;
+
+    if (columns != NULL)
+    {
+        nautilus_columns_show_tag (columns, g_variant_get_string (parameter, NULL));
+    }
+}
+
+static void
 action_view_step (GSimpleAction *action,
                   GVariant      *value,
                   gpointer       user_data)
@@ -2304,12 +2319,14 @@ setup_inspector (NautilusWindow *window)
     g_autoptr (GAction) side = g_settings_create_action (nautilus_flier_settings (), "inspector-side");
     g_autoptr (GAction) bottom_bar = g_settings_create_action (nautilus_flier_settings (), "bottom-bar");
     g_autoptr (GAction) hints = g_settings_create_action (nautilus_flier_settings (), "shortcut-hints");
+    g_autoptr (GAction) groups = g_settings_create_action (nautilus_flier_settings (), "sidebar-groups");
     static const GActionEntry entries[] =
     {
         { .name = "inspector-side-next", .activate = action_inspector_side_next },
         { .name = "inspector-side-previous", .activate = action_inspector_side_previous },
         { .name = "view-mode", .parameter_type = "u", .state = "uint32 1", .change_state = action_view_mode },
         { .name = "view-step", .parameter_type = "i", .activate = action_view_step },
+        { .name = "show-tag", .parameter_type = "s", .activate = action_show_tag },
         { .name = "flat-view", .state = "false", .change_state = action_flat_view },
     };
 
@@ -2329,6 +2346,7 @@ setup_inspector (NautilusWindow *window)
     g_action_map_add_action (G_ACTION_MAP (window), side);
     g_action_map_add_action (G_ACTION_MAP (window), bottom_bar);
     g_action_map_add_action (G_ACTION_MAP (window), hints);
+    g_action_map_add_action (G_ACTION_MAP (window), groups);
     g_action_map_add_action_entries (G_ACTION_MAP (window), entries, G_N_ELEMENTS (entries), window);
     g_signal_connect (window, "notify::active-slot", G_CALLBACK (on_active_slot_for_view_mode), NULL);
 

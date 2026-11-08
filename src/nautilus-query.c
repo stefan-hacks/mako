@@ -52,6 +52,7 @@ struct _NautilusQuery
     gboolean search_content;
     /* Flat view: every file below the location, the text only filters. */
     gboolean flat;
+    char *tag;            /* only files with this tag */
 
     GPtrArray *prepared_words;
 };
@@ -95,6 +96,7 @@ finalize (GObject *object)
     query = NAUTILUS_QUERY (object);
 
     g_free (query->text);
+    g_free (query->tag);
     g_clear_pointer (&query->prepared_words, g_ptr_array_unref);
     g_clear_object (&query->location);
     g_clear_pointer (&query->mime_types, g_ptr_array_unref);
@@ -199,6 +201,7 @@ nautilus_query_copy (NautilusQuery *query)
     copy->search_type = query->search_type;
     copy->search_content = query->search_content;
     copy->flat = query->flat;
+    copy->tag = g_strdup (query->tag);
     g_set_ptr_array (&copy->prepared_words, query->prepared_words);
 
     return copy;
@@ -509,6 +512,20 @@ nautilus_query_set_flat (NautilusQuery *self,
                          gboolean       flat)
 {
     self->flat = flat;
+}
+
+const char *
+nautilus_query_get_tag (NautilusQuery *self)
+{
+    return self->tag;
+}
+
+void
+nautilus_query_set_tag (NautilusQuery *self,
+                        const char    *tag)
+{
+    g_free (self->tag);
+    self->tag = g_strdup (tag);
 }
 
 gboolean

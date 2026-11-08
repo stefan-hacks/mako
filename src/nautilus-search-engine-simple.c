@@ -122,6 +122,7 @@ visit_directory (NautilusSearchEngineSimple *self,
     gboolean recursion_enabled = nautilus_query_recursive (query);
     gboolean per_location_recursive_check = nautilus_query_recursive_local_only (query);
     gboolean flat = flat_view;
+    const char *tag = nautilus_query_get_tag (query);
 
     GFileInfo *info;
     while (g_file_enumerator_iterate (enumerator, &info, NULL, cancellable, NULL) &&
@@ -146,7 +147,14 @@ visit_directory (NautilusSearchEngineSimple *self,
         gboolean found = (match > -1);
         gint64 current_time;
 
-        if (flat && g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
+        if (tag != NULL)
+        {
+            g_auto (GStrv) tags = nautilus_file_tags_from_xattr (
+                g_file_info_get_attribute_string (info, "xattr::xdg.tags"));
+
+            found = found && tags != NULL && g_strv_contains ((const char * const *) tags, tag);
+        }
+        else if (flat && g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
         {
             found = FALSE;
         }

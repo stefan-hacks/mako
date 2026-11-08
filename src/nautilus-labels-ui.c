@@ -580,6 +580,15 @@ nautilus_labels_preferences_page_new (void)
     }
     adw_preferences_page_add (ADW_PREFERENCES_PAGE (page), ADW_PREFERENCES_GROUP (group));
 
+    /* Sidebar */
+    group = adw_preferences_group_new ();
+    adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (group), _("Sidebar"));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (group),
+                               switch_row_new (_("Sidebar _Groups"),
+                                               _("Places, Recent, Starred, Bookmarks, Tags and Devices as groups that fold away"),
+                                               "sidebar-groups"));
+    adw_preferences_page_add (ADW_PREFERENCES_PAGE (page), ADW_PREFERENCES_GROUP (group));
+
     /* Quick Look */
     group = adw_preferences_group_new ();
     adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (group), _("Quick Look"));

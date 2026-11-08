@@ -73,6 +73,10 @@ void           nautilus_query_set_date_range     (NautilusQuery *query,
 gboolean       nautilus_query_get_flat           (NautilusQuery *self);
 void           nautilus_query_set_flat           (NautilusQuery *self,
                                                   gboolean       flat);
+/* Flat view of the files (and folders) with a tag. */
+const char    *nautilus_query_get_tag            (NautilusQuery *self);
+void           nautilus_query_set_tag            (NautilusQuery *self,
+                                                  const char    *tag);
 
 gboolean
 nautilus_query_recursive (NautilusQuery *self);

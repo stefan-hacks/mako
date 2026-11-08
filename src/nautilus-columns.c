@@ -885,6 +885,26 @@ nautilus_columns_set_flat (NautilusColumns *self,
     update_flat (self);
 }
 
+/* Every file under Home with @tag, as a flat view. */
+void
+nautilus_columns_show_tag (NautilusColumns *self,
+                           const char      *tag)
+{
+    g_autoptr (NautilusQuery) query = nautilus_query_new ();
+    g_autoptr (GFile) home = g_file_new_for_path (g_get_home_dir ());
+
+    if (self->slot == NULL)
+    {
+        return;
+    }
+
+    nautilus_query_set_location (query, home);
+    nautilus_query_set_flat (query, TRUE);
+    nautilus_query_set_tag (query, tag);
+    nautilus_window_slot_search (self->slot, query);
+    update_flat (self);
+}
+
 /* Like the wheel: list, columns, grid, then bigger grid items; and back. */
 void
 nautilus_columns_step (NautilusColumns *self,
