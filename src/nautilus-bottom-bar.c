@@ -20,7 +20,7 @@
 #include "nautilus-file.h"
 #include "nautilus-labels.h"
 #include "nautilus-query-editor.h"
-#include "nautilus-view-controls.h"
+#include "nautilus-toolbar-menu-sections.h"
 #include "nautilus-view-item.h"
 #include "nautilus-window-slot.h"
 
@@ -32,7 +32,9 @@ struct _NautilusBottomBar
     NautilusColumns *columns;   /* weak */
 
     GtkWidget *box;
-    GtkWidget *view_buttons[3];
+    GtkWidget *views_button;
+    GtkWidget *sort_button;
+    GMenu *sort_menu;
     GtkWidget *stack;
     GtkWidget *filter_entry;
     GtkWidget *search_box;
@@ -106,6 +108,7 @@ on_filter_changed (NautilusBottomBar *self)
     if (self->words[0] == NULL)
     {
         g_clear_pointer (&self->words, g_strfreev);
+    g_clear_object (&self->sort_menu);
         nautilus_window_slot_set_filter (self->slot, NULL);
         return;
     }
@@ -215,27 +218,38 @@ nautilus_bottom_bar_handle_event (NautilusBottomBar     *self,
 
 /* ---------------------------------------------------------- Views */
 
+static const char *const mode_icons[] =
+{
+    "view-list-symbolic", "view-columns-symbolic", "view-grid-symbolic",
+};
+
+/* The views button shows the tab's view. */
 static void
 sync_mode (NautilusBottomBar *self)
 {
     guint mode = self->columns != NULL ? nautilus_columns_get_mode (self->columns) : NAUTILUS_COLUMNS_MODE_LIST;
 
-    self->syncing = TRUE;
-    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (self->view_buttons[mode - 1]), TRUE);
-    self->syncing = FALSE;
+    gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (self->views_button), mode_icons[mode - 1]);
 }
 
+/* The view's own sort and group items, which change with the view. */
 static void
-on_view_toggled (GtkToggleButton   *button,
-                 NautilusBottomBar *self)
+sync_sort_menu (NautilusBottomBar *self)
 {
-    if (self->syncing || !gtk_toggle_button_get_active (button) || self->columns == NULL)
+    NautilusToolbarMenuSections *sections = self->slot != NULL ?
+                                            nautilus_window_slot_get_toolbar_menu_sections (self->slot) : NULL;
+    g_autoptr (GMenu) hidden = g_menu_new ();
+
+    g_menu_remove_all (self->sort_menu);
+    gtk_widget_set_sensitive (self->sort_button, sections != NULL);
+    if (sections == NULL)
     {
         return;
     }
 
-    nautilus_columns_set_mode (self->columns,
-                               GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (button), "mode")));
+    g_menu_append_section (self->sort_menu, _("Sort"), sections->sort_section);
+    g_menu_append (hidden, _("Show _Hidden Files"), "view.show-hidden-files");
+    g_menu_append_section (self->sort_menu, NULL, G_MENU_MODEL (hidden));
 }
 
 static void
@@ -331,19 +345,64 @@ icon_toggle (const char *icon_name,
     return button;
 }
 
+/* The views of the tab, then what goes with them. */
+static GtkWidget *
+build_views_button (void)
+{
+    GtkWidget *button = gtk_menu_button_new ();
+    g_autoptr (GMenu) menu = g_menu_new ();
+    g_autoptr (GMenu) views = g_menu_new ();
+    g_autoptr (GMenu) zoom = g_menu_new ();
+    g_autoptr (GMenu) more = g_menu_new ();
+    g_autoptr (GMenuItem) item = NULL;
+    GtkWidget *popover;
+    GtkWidget *zoom_button;
+
+    g_menu_append (views, _("_List"), "win.view-mode(uint32 1)");
+    g_menu_append (views, _("_Columns"), "win.view-mode(uint32 2)");
+    g_menu_append (views, _("_Grid"), "win.view-mode(uint32 3)");
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (views));
+
+    item = g_menu_item_new (NULL, NULL);
+    g_menu_item_set_attribute (item, "custom", "s", "zoom-out");
+    g_menu_append_item (zoom, item);
+    g_clear_object (&item);
+    item = g_menu_item_new (NULL, NULL);
+    g_menu_item_set_attribute (item, "custom", "s", "zoom-in");
+    g_menu_append_item (zoom, item);
+    g_clear_object (&item);
+    item = g_menu_item_new_section (_("Icon Size"), G_MENU_MODEL (zoom));
+    g_menu_item_set_attribute (item, "display-hint", "s", "inline-buttons");
+    g_menu_append_item (menu, item);
+    g_clear_object (&item);
+
+    g_menu_append (more, _("_Flat View"), "win.flat-view");
+    g_menu_append (more, _("_Visible Columns…"), "view.visible-columns");
+    g_menu_append (more, _("Captions…"), "view.visible-captions");
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (more));
+
+    popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
+    zoom_button = gtk_button_new_from_icon_name ("zoom-out-symbolic");
+    gtk_actionable_set_action_name (GTK_ACTIONABLE (zoom_button), "view.zoom-out");
+    gtk_widget_set_tooltip_text (zoom_button, _("Zoom Out"));
+    gtk_widget_add_css_class (zoom_button, "flat");
+    gtk_popover_menu_add_child (GTK_POPOVER_MENU (popover), zoom_button, "zoom-out");
+    zoom_button = gtk_button_new_from_icon_name ("zoom-in-symbolic");
+    gtk_actionable_set_action_name (GTK_ACTIONABLE (zoom_button), "view.zoom-in");
+    gtk_widget_set_tooltip_text (zoom_button, _("Zoom In"));
+    gtk_widget_add_css_class (zoom_button, "flat");
+    gtk_popover_menu_add_child (GTK_POPOVER_MENU (popover), zoom_button, "zoom-in");
+
+    gtk_menu_button_set_popover (GTK_MENU_BUTTON (button), popover);
+    gtk_widget_set_tooltip_text (button, _("View (Alt+1, 2, 3)"));
+    gtk_widget_set_valign (button, GTK_ALIGN_CENTER);
+
+    return button;
+}
+
 static void
 nautilus_bottom_bar_init (NautilusBottomBar *self)
 {
-    static const struct
-    {
-        const char *icon;
-        const char *tooltip;
-    } views[] =
-    {
-        { "view-list-symbolic", N_("List (Alt+1)") },
-        { "view-columns-symbolic", N_("Columns (Alt+2)") },
-        { "view-grid-symbolic", N_("Grid (Alt+3)") },
-    };
     GtkWidget *linked = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     GtkWidget *button;
     GtkEventController *keys;
@@ -353,22 +412,6 @@ nautilus_bottom_bar_init (NautilusBottomBar *self)
     self->box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_add_css_class (self->box, "toolbar");
     gtk_widget_set_parent (self->box, GTK_WIDGET (self));
-
-    gtk_widget_add_css_class (linked, "linked");
-    gtk_widget_set_valign (linked, GTK_ALIGN_CENTER);
-    for (guint i = 0; i < G_N_ELEMENTS (views); i++)
-    {
-        self->view_buttons[i] = icon_toggle (views[i].icon, _(views[i].tooltip));
-        g_object_set_data (G_OBJECT (self->view_buttons[i]), "mode", GUINT_TO_POINTER (i + 1));
-        if (i > 0)
-        {
-            gtk_toggle_button_set_group (GTK_TOGGLE_BUTTON (self->view_buttons[i]),
-                                         GTK_TOGGLE_BUTTON (self->view_buttons[0]));
-        }
-        g_signal_connect (self->view_buttons[i], "toggled", G_CALLBACK (on_view_toggled), self);
-        gtk_box_append (GTK_BOX (linked), self->view_buttons[i]);
-    }
-    gtk_box_append (GTK_BOX (self->box), linked);
 
     self->filter_entry = gtk_search_entry_new ();
     gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (self->filter_entry), _("Filter"));
@@ -389,7 +432,21 @@ nautilus_bottom_bar_init (NautilusBottomBar *self)
     gtk_widget_set_valign (self->stack, GTK_ALIGN_CENTER);
     gtk_stack_add_child (GTK_STACK (self->stack), self->filter_entry);
     gtk_stack_add_child (GTK_STACK (self->stack), self->search_box);
-    gtk_box_append (GTK_BOX (self->box), self->stack);
+
+    /* Sorting, next to the filter or search it applies to. */
+    self->sort_menu = g_menu_new ();
+    self->sort_button = gtk_menu_button_new ();
+    gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (self->sort_button), "view-sort-descending-symbolic");
+    gtk_menu_button_set_menu_model (GTK_MENU_BUTTON (self->sort_button), G_MENU_MODEL (self->sort_menu));
+    gtk_widget_set_tooltip_text (self->sort_button, _("Sort and Group"));
+    gtk_widget_set_valign (self->sort_button, GTK_ALIGN_CENTER);
+
+    gtk_widget_add_css_class (linked, "linked");
+    gtk_widget_set_hexpand (linked, TRUE);
+    gtk_widget_set_valign (linked, GTK_ALIGN_CENTER);
+    gtk_box_append (GTK_BOX (linked), self->stack);
+    gtk_box_append (GTK_BOX (linked), self->sort_button);
+    gtk_box_append (GTK_BOX (self->box), linked);
 
     button = icon_toggle ("nautilus-folder-search-symbolic", _("Search (Ctrl+F)"));
     gtk_actionable_set_action_name (GTK_ACTIONABLE (button), "slot.search-visible");
@@ -398,6 +455,9 @@ nautilus_bottom_bar_init (NautilusBottomBar *self)
     self->flat_button = icon_toggle ("view-paged-symbolic", _("Flat View: All Files in Subfolders (Alt+R)"));
     g_signal_connect (self->flat_button, "toggled", G_CALLBACK (on_flat_toggled), self);
     gtk_box_append (GTK_BOX (self->box), self->flat_button);
+
+    self->views_button = build_views_button ();
+    gtk_box_append (GTK_BOX (self->box), self->views_button);
 
     self->filter = gtk_custom_filter_new (matches, self, NULL);
 
@@ -440,14 +500,12 @@ GtkWidget *
 nautilus_bottom_bar_new (NautilusWindowSlot *slot)
 {
     NautilusBottomBar *self = g_object_new (NAUTILUS_TYPE_BOTTOM_BAR, NULL);
-    GtkWidget *controls = g_object_new (NAUTILUS_TYPE_VIEW_CONTROLS, "window-slot", slot, NULL);
 
     g_set_weak_pointer (&self->slot, slot);
     g_set_weak_pointer (&self->columns, NAUTILUS_COLUMNS (nautilus_window_slot_get_columns (slot)));
 
-    /* The view menu: icon sizes, sorting, hidden files, columns. */
-    gtk_widget_set_valign (controls, GTK_ALIGN_CENTER);
-    gtk_box_append (GTK_BOX (self->box), controls);
+    g_signal_connect_object (slot, "notify::toolbar-menu-sections", G_CALLBACK (sync_sort_menu), self,
+                             G_CONNECT_SWAPPED);
 
     if (self->columns != NULL)
     {
@@ -463,6 +521,7 @@ nautilus_bottom_bar_new (NautilusWindowSlot *slot)
 
     sync_mode (self);
     sync_flat (self);
+    sync_sort_menu (self);
 
     return GTK_WIDGET (self);
 }
