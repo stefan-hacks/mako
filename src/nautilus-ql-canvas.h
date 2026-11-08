@@ -19,7 +19,8 @@ G_BEGIN_DECLS
 
 G_DECLARE_FINAL_TYPE (NautilusQlCanvas, nautilus_ql_canvas, NAUTILUS, QL_CANVAS, GtkWidget)
 
-/* Signal "item-activated" (NautilusFile *): an item was double-clicked. */
+/* Signals: "item-activated" (NautilusFile *), an item was double-clicked;
+ * "picture-loaded", the picture shown alone is in at full size. */
 GtkWidget    *nautilus_ql_canvas_new          (void);
 
 /* One file: shown alone, as a full-size picture if it is one. Several:

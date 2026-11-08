@@ -79,6 +79,7 @@ enum
 enum
 {
     ITEM_ACTIVATED,
+    PICTURE_LOADED,
     N_SIGNALS
 };
 
@@ -443,6 +444,10 @@ on_frame_loaded (GObject      *source,
         if (frame != NULL)
         {
             item->full = gly_gtk_frame_get_texture (frame);
+            if (is_single (self))
+            {
+                g_signal_emit (self, signals[PICTURE_LOADED], 0);
+            }
         }
         else
         {
@@ -1130,6 +1135,9 @@ nautilus_ql_canvas_class_init (NautilusQlCanvasClass *klass)
     signals[ITEM_ACTIVATED] = g_signal_new ("item-activated", G_TYPE_FROM_CLASS (klass),
                                             G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
                                             G_TYPE_NONE, 1, NAUTILUS_TYPE_FILE);
+    signals[PICTURE_LOADED] = g_signal_new ("picture-loaded", G_TYPE_FROM_CLASS (klass),
+                                            G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+                                            G_TYPE_NONE, 0);
 
     gtk_widget_class_set_css_name (widget_class, "nautilus-ql-canvas");
 }

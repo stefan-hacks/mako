@@ -32,6 +32,7 @@
 #include "nautilus-labels-ui.h"
 #include "nautilus-mime-actions.h"
 #include "nautilus-ql-canvas.h"
+#include "nautilus-text-preview.h"
 
 /* Text files are shown up to this much. */
 #define TEXT_LIMIT (512 * 1024)
@@ -62,10 +63,7 @@ struct _NautilusQuickLook
     GtkMediaControls *media_controls;
     GtkMediaStream *media;
 
-    GtkLabel *line_numbers;
-    GtkTextView *text;
-    GtkScrolledWindow *text_scroller;
-    GCancellable *text_cancellable;
+    NautilusTextPreview *text;
 
     GtkWidget *info_image;
     GtkLabel *info_name;
@@ -338,86 +336,6 @@ step_frame (NautilusQuickLook *self,
     }
 }
 
-/* --------------------------------------------------------------- Text */
-
-static void
-on_text_read (GObject      *source,
-              GAsyncResult *result,
-              gpointer      user_data)
-{
-    g_autoptr (GError) error = NULL;
-    g_autoptr (GBytes) bytes = g_input_stream_read_bytes_finish (G_INPUT_STREAM (source), result, &error);
-    NautilusQuickLook *self = user_data;
-
-    if (bytes == NULL)
-    {
-        if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
-        {
-            gtk_text_buffer_set_text (gtk_text_view_get_buffer (self->text), error->message, -1);
-        }
-        g_object_unref (source);
-        return;
-    }
-
-    gsize size;
-    const char *data = g_bytes_get_data (bytes, &size);
-    g_autofree char *text = g_utf8_make_valid (data != NULL ? data : "", size);
-    g_autoptr (GString) numbers = g_string_new ("1");
-    guint lines = 1;
-
-    for (const char *p = text; *p != '\0'; p++)
-    {
-        if (*p == '\n' && p[1] != '\0')
-        {
-            g_string_append_printf (numbers, "\n%u", ++lines);
-        }
-    }
-
-    gtk_text_buffer_set_text (gtk_text_view_get_buffer (self->text), text, -1);
-    gtk_label_set_text (self->line_numbers, numbers->str);
-    g_object_unref (source);
-}
-
-static void
-on_text_opened (GObject      *source,
-                GAsyncResult *result,
-                gpointer      user_data)
-{
-    g_autoptr (GError) error = NULL;
-    GFileInputStream *stream = g_file_read_finish (G_FILE (source), result, &error);
-    NautilusQuickLook *self = user_data;
-
-    if (stream == NULL)
-    {
-        if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
-        {
-            gtk_text_buffer_set_text (gtk_text_view_get_buffer (self->text), error->message, -1);
-        }
-        return;
-    }
-
-    g_input_stream_read_bytes_async (G_INPUT_STREAM (stream), TEXT_LIMIT, G_PRIORITY_DEFAULT,
-                                     self->text_cancellable, on_text_read, self);
-}
-
-static void
-show_text (NautilusQuickLook *self,
-           NautilusFile      *file)
-{
-    g_autoptr (GFile) location = nautilus_file_get_location (file);
-
-    g_cancellable_cancel (self->text_cancellable);
-    g_set_object (&self->text_cancellable, g_cancellable_new ());
-
-    gtk_text_buffer_set_text (gtk_text_view_get_buffer (self->text), "", -1);
-    gtk_label_set_text (self->line_numbers, "");
-    gtk_adjustment_set_value (gtk_scrolled_window_get_vadjustment (self->text_scroller), 0);
-    gtk_adjustment_set_value (gtk_scrolled_window_get_hadjustment (self->text_scroller), 0);
-
-    g_file_read_async (location, G_PRIORITY_DEFAULT, self->text_cancellable, on_text_opened, self);
-    gtk_stack_set_visible_child_name (self->stack, "text");
-}
-
 /* --------------------------------------------------------------- Info */
 
 static void
@@ -441,21 +359,12 @@ show_info (NautilusQuickLook *self,
 
 /* ------------------------------------------------------------ Showing */
 
-static gboolean
-is_text (const char *mime)
-{
-    return g_content_type_is_a (mime, "text/plain") ||
-           g_content_type_is_a (mime, "application/json") ||
-           g_content_type_is_a (mime, "application/xml") ||
-           g_content_type_is_a (mime, "application/x-desktop");
-}
-
 static void
 show_current (NautilusQuickLook *self)
 {
     NautilusFile *file = shown_file (self);
 
-    g_cancellable_cancel (self->text_cancellable);
+    nautilus_text_preview_set_file (self->text, NULL);
 
     if (file == NULL)
     {
@@ -478,10 +387,11 @@ show_current (NautilusQuickLook *self)
         {
             show_media (self, file, g_str_has_prefix (mime, "audio/"));
         }
-        else if (regular && is_text (mime))
+        else if (regular && nautilus_text_preview_handles (mime))
         {
             stop_media (self);
-            show_text (self, file);
+            nautilus_text_preview_set_file (self->text, file);
+            gtk_stack_set_visible_child_name (self->stack, "text");
         }
         else
         {
@@ -813,7 +723,7 @@ static gboolean
 on_close_request (NautilusQuickLook *self)
 {
     stop_media (self);
-    g_cancellable_cancel (self->text_cancellable);
+    nautilus_text_preview_set_file (self->text, NULL);
     watch_files (self, FALSE);
     g_clear_object (&self->alone);
     g_clear_list (&self->files, g_object_unref);
@@ -918,41 +828,6 @@ build_media_page (NautilusQuickLook *self)
 }
 
 static GtkWidget *
-build_text_page (NautilusQuickLook *self)
-{
-    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-
-    /* Line numbers beside the text, in one scroller, so they stay in line
-     * without a source view. Lines aren't wrapped for the same reason. */
-    self->line_numbers = GTK_LABEL (gtk_label_new (NULL));
-    gtk_label_set_xalign (self->line_numbers, 1.0);
-    gtk_label_set_yalign (self->line_numbers, 0.0);
-    gtk_widget_add_css_class (GTK_WIDGET (self->line_numbers), "monospace");
-    gtk_widget_add_css_class (GTK_WIDGET (self->line_numbers), "dim-label");
-    gtk_widget_add_css_class (GTK_WIDGET (self->line_numbers), "quick-look-line-numbers");
-    gtk_box_append (GTK_BOX (box), GTK_WIDGET (self->line_numbers));
-
-    self->text = GTK_TEXT_VIEW (gtk_text_view_new ());
-    gtk_text_view_set_editable (self->text, FALSE);
-    gtk_text_view_set_cursor_visible (self->text, FALSE);
-    gtk_text_view_set_monospace (self->text, TRUE);
-    gtk_text_view_set_wrap_mode (self->text, GTK_WRAP_NONE);
-    gtk_text_view_set_left_margin (self->text, 12);
-    gtk_text_view_set_top_margin (self->text, 12);
-    gtk_text_view_set_bottom_margin (self->text, 12);
-    gtk_text_view_set_right_margin (self->text, 12);
-    gtk_widget_set_hexpand (GTK_WIDGET (self->text), TRUE);
-    gtk_widget_set_vexpand (GTK_WIDGET (self->text), TRUE);
-    gtk_box_append (GTK_BOX (box), GTK_WIDGET (self->text));
-
-    self->text_scroller = GTK_SCROLLED_WINDOW (gtk_scrolled_window_new ());
-    gtk_scrolled_window_set_child (self->text_scroller, box);
-    gtk_widget_add_css_class (GTK_WIDGET (self->text_scroller), "view");
-
-    return GTK_WIDGET (self->text_scroller);
-}
-
-static GtkWidget *
 build_info_page (NautilusQuickLook *self)
 {
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 12);
@@ -994,6 +869,7 @@ nautilus_quick_look_init (NautilusQuickLook *self)
 
     self->canvas = NAUTILUS_QL_CANVAS (nautilus_ql_canvas_new ());
     g_signal_connect (self->canvas, "item-activated", G_CALLBACK (on_item_activated), self);
+    g_signal_connect_swapped (self->canvas, "picture-loaded", G_CALLBACK (update_title), self);
     g_settings_bind (nautilus_flier_settings (), "quick-look-names", self->canvas, "show-names",
                      G_SETTINGS_BIND_GET);
     g_settings_bind (nautilus_flier_settings (), "quick-look-marks", self->canvas, "show-marks",
@@ -1004,7 +880,8 @@ nautilus_quick_look_init (NautilusQuickLook *self)
     self->stack = GTK_STACK (gtk_stack_new ());
     gtk_stack_add_named (self->stack, GTK_WIDGET (self->canvas), "canvas");
     gtk_stack_add_named (self->stack, build_media_page (self), "media");
-    gtk_stack_add_named (self->stack, build_text_page (self), "text");
+    self->text = NAUTILUS_TEXT_PREVIEW (nautilus_text_preview_new (TEXT_LIMIT));
+    gtk_stack_add_named (self->stack, GTK_WIDGET (self->text), "text");
     gtk_stack_add_named (self->stack, build_info_page (self), "info");
     adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar), GTK_WIDGET (self->stack));
     adw_window_set_content (ADW_WINDOW (self), toolbar);
@@ -1025,8 +902,6 @@ nautilus_quick_look_dispose (GObject *object)
     NautilusQuickLook *self = NAUTILUS_QUICK_LOOK (object);
 
     stop_media (self);
-    g_cancellable_cancel (self->text_cancellable);
-    g_clear_object (&self->text_cancellable);
     watch_files (self, FALSE);
     g_clear_object (&self->alone);
     g_clear_list (&self->files, g_object_unref);

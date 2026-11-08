@@ -66,6 +66,7 @@
 #include "nautilus-tile-layout.h"
 #include "nautilus-signaller.h"
 #include "nautilus-toolbar.h"
+#include "nautilus-inspector.h"
 #include "nautilus-labels.h"
 #include "nautilus-shortcuts.h"
 #include "nautilus-trash-monitor.h"
@@ -108,6 +109,10 @@ struct _NautilusWindow
     AdwTabBar *tab_bar;
     AdwTabPage *menu_page;
     NautilusTileLayout *tile_layout;
+    GtkPaned *inspector_paned;
+    GtkWidget *inspector;
+    gboolean inspector_placed;
+    guint inspector_save_id;
     GMenuModel *tab_menu_model;
     gboolean tab_bar_inverted;
 
@@ -1691,6 +1696,7 @@ nautilus_window_dispose (GObject *object)
 
     window = NAUTILUS_WINDOW (object);
 
+    g_clear_handle_id (&window->inspector_save_id, g_source_remove);
     g_debug ("Destroying window");
 
     /* close all slots safely */
@@ -2011,6 +2017,164 @@ on_click_gesture_pressed (GtkGestureClick *gesture,
     }
 }
 
+/* ---------------------------------------------------------- Inspector
+ *
+ * Docked beside (or under) the tiles, in a paned that remembers its size.
+ */
+
+typedef enum
+{
+    INSPECTOR_RIGHT,
+    INSPECTOR_LEFT,
+    INSPECTOR_BOTTOM,
+} InspectorSide;
+
+static gboolean
+save_inspector_size (gpointer user_data)
+{
+    NautilusWindow *window = user_data;
+    GtkPaned *paned = window->inspector_paned;
+    int total = gtk_orientable_get_orientation (GTK_ORIENTABLE (paned)) == GTK_ORIENTATION_HORIZONTAL
+                ? gtk_widget_get_width (GTK_WIDGET (paned))
+                : gtk_widget_get_height (GTK_WIDGET (paned));
+    int position = gtk_paned_get_position (paned);
+    int size = gtk_paned_get_start_child (paned) == window->inspector ? position : total - position;
+
+    window->inspector_save_id = 0;
+    if (size > 80)
+    {
+        g_settings_set_int (nautilus_flier_settings (), "inspector-size", size);
+    }
+
+    return G_SOURCE_REMOVE;
+}
+
+static void
+on_inspector_position (NautilusWindow *window)
+{
+    if (window->inspector_placed && gtk_widget_get_visible (window->inspector))
+    {
+        g_clear_handle_id (&window->inspector_save_id, g_source_remove);
+        window->inspector_save_id = g_timeout_add (400, save_inspector_size, window);
+    }
+}
+
+/* Puts the divider where the saved size says, once the paned has a size. */
+static void
+place_inspector (NautilusWindow *window)
+{
+    GtkPaned *paned = window->inspector_paned;
+    int size = g_settings_get_int (nautilus_flier_settings (), "inspector-size");
+    int total = gtk_orientable_get_orientation (GTK_ORIENTABLE (paned)) == GTK_ORIENTATION_HORIZONTAL
+                ? gtk_widget_get_width (GTK_WIDGET (paned))
+                : gtk_widget_get_height (GTK_WIDGET (paned));
+
+    if (total <= 0 || !gtk_widget_get_visible (window->inspector))
+    {
+        return;
+    }
+
+    window->inspector_placed = FALSE;
+    gtk_paned_set_position (paned, gtk_paned_get_start_child (paned) == window->inspector
+                            ? size : MAX (total - size, total / 3));
+    window->inspector_placed = TRUE;
+}
+
+static void
+on_paned_max_position (NautilusWindow *window)
+{
+    if (!window->inspector_placed)
+    {
+        place_inspector (window);
+    }
+}
+
+static void
+arrange_inspector (NautilusWindow *window)
+{
+    GSettings *flier = nautilus_flier_settings ();
+    InspectorSide side = g_settings_get_enum (flier, "inspector-side");
+    GtkPaned *paned = window->inspector_paned;
+    GtkWidget *layout = GTK_WIDGET (window->tile_layout);
+    GtkWidget *start = side == INSPECTOR_LEFT ? window->inspector : layout;
+    GtkWidget *end = side == INSPECTOR_LEFT ? layout : window->inspector;
+
+    g_object_ref (layout);
+    g_object_ref (window->inspector);
+    gtk_paned_set_start_child (paned, NULL);
+    gtk_paned_set_end_child (paned, NULL);
+    gtk_orientable_set_orientation (GTK_ORIENTABLE (paned),
+                                    side == INSPECTOR_BOTTOM ? GTK_ORIENTATION_VERTICAL
+                                                             : GTK_ORIENTATION_HORIZONTAL);
+    gtk_paned_set_start_child (paned, start);
+    gtk_paned_set_end_child (paned, end);
+    gtk_paned_set_resize_start_child (paned, start == layout);
+    gtk_paned_set_resize_end_child (paned, end == layout);
+    gtk_paned_set_shrink_start_child (paned, FALSE);
+    gtk_paned_set_shrink_end_child (paned, FALSE);
+    g_object_unref (layout);
+    g_object_unref (window->inspector);
+
+    gtk_widget_set_visible (window->inspector, g_settings_get_boolean (flier, "inspector-visible"));
+    window->inspector_placed = FALSE;
+    place_inspector (window);
+}
+
+static void
+on_active_slot_for_inspector (NautilusWindow *window)
+{
+    nautilus_inspector_set_slot (NAUTILUS_INSPECTOR (window->inspector), window->active_slot);
+}
+
+static void
+action_inspector_side_next (GSimpleAction *action,
+                            GVariant      *parameter,
+                            gpointer       user_data)
+{
+    GSettings *flier = nautilus_flier_settings ();
+
+    g_settings_set_enum (flier, "inspector-side", (g_settings_get_enum (flier, "inspector-side") + 1) % 3);
+    g_settings_set_boolean (flier, "inspector-visible", TRUE);
+}
+
+static void
+setup_inspector (NautilusWindow *window)
+{
+    GtkWidget *layout = GTK_WIDGET (window->tile_layout);
+    GtkWidget *parent = gtk_widget_get_parent (layout);
+    g_autoptr (GAction) visible = g_settings_create_action (nautilus_flier_settings (), "inspector-visible");
+    static const GActionEntry entries[] =
+    {
+        { .name = "inspector-side-next", .activate = action_inspector_side_next },
+    };
+
+    window->inspector = nautilus_inspector_new ();
+    window->inspector_paned = GTK_PANED (gtk_paned_new (GTK_ORIENTATION_HORIZONTAL));
+    gtk_paned_set_wide_handle (window->inspector_paned, FALSE);
+    gtk_widget_add_css_class (GTK_WIDGET (window->inspector_paned), "inspector-paned");
+
+    /* In the tiles' place in the template. */
+    g_object_ref (layout);
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (parent), GTK_WIDGET (window->inspector_paned));
+    gtk_paned_set_start_child (window->inspector_paned, layout);
+    g_object_unref (layout);
+    arrange_inspector (window);
+
+    g_action_map_add_action (G_ACTION_MAP (window), visible);
+    g_action_map_add_action_entries (G_ACTION_MAP (window), entries, G_N_ELEMENTS (entries), window);
+
+    g_signal_connect_object (nautilus_flier_settings (), "changed::inspector-visible",
+                             G_CALLBACK (arrange_inspector), window, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::inspector-side",
+                             G_CALLBACK (arrange_inspector), window, G_CONNECT_SWAPPED);
+    g_signal_connect_swapped (window->inspector_paned, "notify::position",
+                              G_CALLBACK (on_inspector_position), window);
+    g_signal_connect_swapped (window->inspector_paned, "notify::max-position",
+                              G_CALLBACK (on_paned_max_position), window);
+    g_signal_connect (window, "notify::active-slot",
+                      G_CALLBACK (on_active_slot_for_inspector), NULL);
+}
+
 /* Holding Alt shows the stars of every tile under the pointer. */
 static gboolean
 on_modifiers_changed (GtkEventControllerKey *controller,
@@ -2094,6 +2258,7 @@ nautilus_window_init (NautilusWindow *window)
                       G_CALLBACK (on_window_active_changed), NULL);
 
     nautilus_shortcuts_attach (GTK_WINDOW (window));
+    setup_inspector (window);
 }
 
 static void

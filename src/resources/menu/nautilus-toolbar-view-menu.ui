@@ -66,6 +66,10 @@
       <attribute name="nautilus-menu-item">relevance</attribute>
     </item>
     <section>
+      <item>
+        <attribute name="action">win.inspector-visible</attribute>
+        <attribute name="label" translatable="yes">_Inspector</attribute>
+      </item>
       <submenu>
         <attribute name="label" translatable="yes">_Group By</attribute>
         <section>
