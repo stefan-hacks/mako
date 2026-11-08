@@ -417,7 +417,6 @@ nautilus-tile-layout.split nautilus-tile:not(.active-tile) tabbar tab:selected {
 nautilus-tile-layout.split nautilus-tile:not(.active-tile) tabbar tab:selected button.tab-close-button { color: inherit; }
 
 /* Quick Look */
-.quick-look .star.rated { color: #f5c211; }
 .quick-look .star { min-width: 24px; padding-left: 2px; padding-right: 2px; }
 .line-numbers {
   padding: 12px 8px 12px 12px;
@@ -432,7 +431,6 @@ columnview header .group-header { padding: 12px 12px 4px 12px; }
 /* Inspector */
 nautilus-inspector { background-color: var(--view-bg-color); }
 .inspector-preview nautilus-ql-canvas { background-color: transparent; }
-nautilus-inspector .star.rated { color: #f5c211; }
 nautilus-inspector .star { min-width: 28px; padding-left: 2px; padding-right: 2px; }
 
 /* Miller columns */

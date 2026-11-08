@@ -1664,13 +1664,16 @@ extra_drag_drop_cb (AdwTabBar    *self,
 /* ------------------------------------------------------------ Capture */
 
 /* For the README's pictures: with FLIER_CAPTURE set, win.flier-capture(s)
- * takes "shot:FILE.png", "rec:DIR" / "stop" (frames at 15 per second),
+ * takes "shot:FILE.png", "rec:DIR" / "stop" (frames at FLIER_CAPTURE_FPS,
+ * default 15), "page:TITLE" and "scroll:PIXELS" for Preferences,
+ * "set:KEY=VALUE" for an org.gnome.nautilus.flier key,
  * "act:ACTION" (run on the files view, so view., slot. and win. all work),
  * "select:NAME,NAME" and "size:W,H". Nothing of this exists otherwise. */
 
 static guint capture_timer;
 static char *capture_dir;
 static guint capture_frame;
+static gint64 capture_start;
 
 static void
 capture_to_png (NautilusWindow *window,
@@ -1696,10 +1699,57 @@ capture_to_png (NautilusWindow *window,
     gdk_texture_save_to_png (texture, path);
 }
 
+static GtkWidget *
+capture_find_page (GtkWidget  *widget,
+                   const char *title)
+{
+    if (ADW_IS_PREFERENCES_PAGE (widget) &&
+        (title == NULL ? gtk_widget_get_mapped (widget)
+                       : g_strcmp0 (adw_preferences_page_get_title (ADW_PREFERENCES_PAGE (widget)), title) == 0))
+    {
+        return widget;
+    }
+    for (GtkWidget *child = gtk_widget_get_first_child (widget); child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        GtkWidget *found = capture_find_page (child, title);
+
+        if (found != NULL)
+        {
+            return found;
+        }
+    }
+    return NULL;
+}
+
+static GtkWidget *
+capture_find_scroller (GtkWidget *widget)
+{
+    if (GTK_IS_SCROLLED_WINDOW (widget))
+    {
+        return widget;
+    }
+    for (GtkWidget *child = gtk_widget_get_first_child (widget); child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        GtkWidget *found = capture_find_scroller (child);
+
+        if (found != NULL)
+        {
+            return found;
+        }
+    }
+    return NULL;
+}
+
 static gboolean
 capture_tick (gpointer data)
 {
-    g_autofree char *path = g_strdup_printf ("%s/%05u.png", capture_dir, capture_frame++);
+    /* Named by milliseconds since "rec:", so slow frames keep real time. */
+    g_autofree char *path = g_strdup_printf ("%s/%08" G_GINT64_FORMAT ".png", capture_dir,
+                                             (g_get_monotonic_time () - capture_start) / 1000);
+
+    capture_frame++;
 
     capture_to_png (data, path);
     return G_SOURCE_CONTINUE;
@@ -1724,8 +1774,11 @@ action_flier_capture (GSimpleAction *action,
         g_free (capture_dir);
         capture_dir = g_strdup (command + 4);
         capture_frame = 0;
+        capture_start = g_get_monotonic_time ();
         g_clear_handle_id (&capture_timer, g_source_remove);
-        capture_timer = g_timeout_add (1000 / 15, capture_tick, window);
+        const char *fps = g_getenv ("FLIER_CAPTURE_FPS");
+
+        capture_timer = g_timeout_add (1000 / (fps != NULL ? MAX (1, atoi (fps)) : 15), capture_tick, window);
     }
     else if (g_str_equal (command, "stop"))
     {
@@ -1761,6 +1814,47 @@ action_flier_capture (GSimpleAction *action,
         }
         nautilus_files_view_set_selection (view, files, TRUE);
         nautilus_file_list_free (files);
+    }
+    else if (g_str_has_prefix (command, "set:") && strchr (command, '=') != NULL)
+    {
+        g_autofree char *key = g_strndup (command + 4, strchr (command, '=') - (command + 4));
+        g_autoptr (GSettingsSchema) schema = NULL;
+        g_autoptr (GSettingsSchemaKey) schema_key = NULL;
+        g_autoptr (GVariant) value = NULL;
+
+        g_object_get (nautilus_flier_settings (), "settings-schema", &schema, NULL);
+        if (g_settings_schema_has_key (schema, key))
+        {
+            schema_key = g_settings_schema_get_key (schema, key);
+            value = g_variant_parse (g_settings_schema_key_get_value_type (schema_key),
+                                     strchr (command, '=') + 1, NULL, NULL, NULL);
+            if (value != NULL)
+            {
+                g_settings_set_value (nautilus_flier_settings (), key, value);
+            }
+        }
+    }
+    else if (g_str_has_prefix (command, "page:"))
+    {
+        GtkWidget *page = capture_find_page (GTK_WIDGET (window), command + 5);
+        GtkWidget *dialog = page != NULL ? gtk_widget_get_ancestor (page, ADW_TYPE_PREFERENCES_DIALOG) : NULL;
+
+        if (dialog != NULL)
+        {
+            adw_preferences_dialog_set_visible_page (ADW_PREFERENCES_DIALOG (dialog), ADW_PREFERENCES_PAGE (page));
+        }
+    }
+    else if (g_str_has_prefix (command, "scroll:"))
+    {
+        GtkWidget *page = capture_find_page (GTK_WIDGET (window), NULL);
+        GtkWidget *scroller = page != NULL ? capture_find_scroller (page) : NULL;
+
+        if (scroller != NULL)
+        {
+            GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (scroller));
+
+            gtk_adjustment_set_value (adj, gtk_adjustment_get_value (adj) + atof (command + 7));
+        }
     }
     else if (g_str_has_prefix (command, "go:") && window->active_slot != NULL)
     {
@@ -1833,6 +1927,9 @@ nautilus_window_initialize_actions (NautilusWindow *window)
             const char *collapsed[] = { "recent", NULL };
             const char *hidden[] = { "devices", "cloud", NULL };
 
+            /* A window behind others gets few frames; without animations
+             * dialogs and previews show at once in the recording. */
+            g_object_set (gtk_settings_get_default (), "gtk-enable-animations", FALSE, NULL);
             g_settings_set_boolean (flier, "file-flier-imported", TRUE);
             g_settings_set_boolean (flier, "sidebar-groups", TRUE);
             g_settings_set_strv (flier, "sidebar-collapsed", collapsed);

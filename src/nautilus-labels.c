@@ -882,8 +882,6 @@ nautilus_labels_tint_paintable (GdkPaintable *icon,
 
 /* --------------------------------------------------------------- Stars */
 
-/* Filled stars: GNOME's yellow 4, readable on light and dark. */
-static const GdkRGBA star_color = { 0xf5 / 255.0f, 0xc2 / 255.0f, 0x11 / 255.0f, 1.0f };
 
 void
 nautilus_labels_draw_stars (GtkSnapshot           *snapshot,
@@ -893,6 +891,11 @@ nautilus_labels_draw_stars (GtkSnapshot           *snapshot,
                             int                    scale)
 {
     float size = MIN (bounds->size.height, bounds->size.width / 5);
+    /* Filled stars in the empty ones' color at full strength (white on dark
+     * and on the tiles' badges): the shape tells them apart, not a hue. */
+    GdkRGBA star_color = *empty_color;
+
+    star_color.alpha = 1.0f;
 
     for (guint i = 0; i < 5; i++)
     {

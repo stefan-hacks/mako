@@ -562,6 +562,20 @@ nautilus_image_set_fallback (NautilusImage *self,
                   gdk_paintable_get_intrinsic_height (paintable));
     }
 
+    /* Follow changes of the icon itself (a folder color's new scheme). */
+    if (self->fallback_paintable != paintable)
+    {
+        if (self->fallback_paintable != NULL)
+        {
+            g_signal_handlers_disconnect_by_func (self->fallback_paintable, gtk_widget_queue_draw, self);
+        }
+        if (paintable != NULL)
+        {
+            g_signal_connect_object (paintable, "invalidate-contents",
+                                     G_CALLBACK (gtk_widget_queue_draw), self, G_CONNECT_SWAPPED);
+        }
+    }
+
     if (g_set_object (&self->fallback_paintable, paintable) &&
         nautilus_image_get_status (self) == NAUTILUS_IMAGE_STATUS_FALLBACK)
     {
