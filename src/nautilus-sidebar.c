@@ -335,7 +335,7 @@ static char *get_home_directory_uri (void);
  * it away, like File Flier's sidebar, and Recent and Starred get groups of
  * their own. Tags are a section either way. */
 
-#define MAX_RECENT_FOLDERS 8
+#define MAX_RECENT_FOLDERS 10
 
 static gboolean
 groups_on (void)
@@ -350,7 +350,6 @@ group_id (NautilusSidebarSectionType section)
     {
         case NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS: return "places";
         case NAUTILUS_SIDEBAR_SECTION_RECENT: return "recent";
-        case NAUTILUS_SIDEBAR_SECTION_STARRED: return "starred";
         case NAUTILUS_SIDEBAR_SECTION_BOOKMARKS: return "bookmarks";
         case NAUTILUS_SIDEBAR_SECTION_TAGS: return "tags";
         case NAUTILUS_SIDEBAR_SECTION_CLOUD: return "cloud";
@@ -366,12 +365,42 @@ group_title (NautilusSidebarSectionType section)
     {
         case NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS: return _("Places");
         case NAUTILUS_SIDEBAR_SECTION_RECENT: return _("Recent");
-        case NAUTILUS_SIDEBAR_SECTION_STARRED: return _("Starred");
         case NAUTILUS_SIDEBAR_SECTION_BOOKMARKS: return _("Bookmarks");
         case NAUTILUS_SIDEBAR_SECTION_TAGS: return _("Tags");
         case NAUTILUS_SIDEBAR_SECTION_CLOUD: return _("Cloud");
-        case NAUTILUS_SIDEBAR_SECTION_MOUNTS: return _("Devices");
+        case NAUTILUS_SIDEBAR_SECTION_MOUNTS: return _("Storage");
         default: return "";
+    }
+}
+
+static const char *
+group_icon (NautilusSidebarSectionType section)
+{
+    switch (section)
+    {
+        case NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS: return "folder-symbolic";
+        case NAUTILUS_SIDEBAR_SECTION_RECENT: return "document-open-recent-symbolic";
+        case NAUTILUS_SIDEBAR_SECTION_BOOKMARKS: return "user-bookmarks-symbolic";
+        case NAUTILUS_SIDEBAR_SECTION_TAGS: return "media-record-symbolic";
+        case NAUTILUS_SIDEBAR_SECTION_CLOUD: return "folder-remote-symbolic";
+        case NAUTILUS_SIDEBAR_SECTION_MOUNTS: return "drive-harddisk-symbolic";
+        default: return NULL;
+    }
+}
+
+/* File Flier's order: Bookmarks, Places, Storage, Recent, Tags. */
+static int
+group_rank (NautilusSidebarSectionType section)
+{
+    switch (section)
+    {
+        case NAUTILUS_SIDEBAR_SECTION_BOOKMARKS: return 0;
+        case NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS: return 1;
+        case NAUTILUS_SIDEBAR_SECTION_CLOUD: return 2;
+        case NAUTILUS_SIDEBAR_SECTION_MOUNTS: return 3;
+        case NAUTILUS_SIDEBAR_SECTION_RECENT: return 4;
+        case NAUTILUS_SIDEBAR_SECTION_TAGS: return 5;
+        default: return 6;
     }
 }
 
@@ -593,7 +622,7 @@ add_tags (NautilusSidebar *sidebar)
         gtk_widget_add_css_class (row, class);
         nautilus_labels_get_tag_color (tag, &rgba);
         color = gdk_rgba_to_string (&rgba);
-        g_string_append_printf (css, ".%s image.sidebar-icon { color: %s; }\n", class, color);
+        g_string_append_printf (css, "row.%s box > image:first-child { color: %s; }\n", class, color);
     }
     update_tag_css (css);
 }
@@ -636,8 +665,9 @@ add_flier_rows (NautilusSidebar *sidebar)
     {
         if (present[section])
         {
+            g_autoptr (GIcon) icon = g_themed_icon_new (group_icon (section));
             GtkWidget *header = add_place (sidebar, NAUTILUS_SIDEBAR_ROW_GROUP_HEADER, section,
-                                           group_title (section), NULL, NULL, NULL, NULL, NULL, NULL,
+                                           group_title (section), icon, NULL, NULL, NULL, NULL, NULL,
                                            NULL, 0, NULL);
 
             gtk_widget_add_css_class (header, "sidebar-group-header");
@@ -1029,7 +1059,7 @@ update_places (NautilusSidebar *sidebar)
         start_icon = g_themed_icon_new_with_default_fallbacks ("document-open-recent-symbolic");
         add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
                    groups_on () ? NAUTILUS_SIDEBAR_SECTION_RECENT : NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
-                   _("Recent"), start_icon, NULL, SCHEME_RECENT ":///",
+                   groups_on () ? _("Recent Files") : _("Recent"), start_icon, NULL, SCHEME_RECENT ":///",
                    NULL, NULL, NULL, NULL, 0,
                    _("Recent Files"));
         g_object_unref (start_icon);
@@ -1037,7 +1067,7 @@ update_places (NautilusSidebar *sidebar)
 
     start_icon = g_themed_icon_new_with_default_fallbacks ("starred-symbolic");
     add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
-               groups_on () ? NAUTILUS_SIDEBAR_SECTION_STARRED : NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
+               NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
                _("Starred"), start_icon, NULL, SCHEME_STARRED ":///",
                NULL, NULL, NULL, NULL, 0,
                _("Starred Files"));
@@ -3741,6 +3771,10 @@ list_box_sort_func (GtkListBoxRow *row1,
 
     if (section_type_1 != section_type_2)
     {
+        if (groups_on ())
+        {
+            return group_rank (section_type_1) - group_rank (section_type_2);
+        }
         /* Order by section. That means the order in the enum of section types
          * define the actual order of them in the list */
         return section_type_1 - section_type_2;

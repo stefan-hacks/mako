@@ -598,7 +598,7 @@ nautilus_labels_preferences_page_new (void)
     adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (group), _("Sidebar"));
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (group),
                                switch_row_new (_("Sidebar _Groups"),
-                                               _("Places, Recent, Starred, Bookmarks, Tags and Devices as groups that fold away"),
+                                               _("Bookmarks, Places, Storage, Recent and Tags as groups that fold away"),
                                                "sidebar-groups"));
     adw_preferences_page_add (ADW_PREFERENCES_PAGE (page), ADW_PREFERENCES_GROUP (group));
 
