@@ -508,6 +508,23 @@ nautilus_query_editor_class_init (NautilusQueryEditorClass *class)
 }
 
 static void
+update_prompt (NautilusQueryEditor *editor)
+{
+    gboolean flat = editor->query != NULL && nautilus_query_get_flat (editor->query);
+
+    gtk_image_set_from_icon_name (GTK_IMAGE (editor->prefix_icon),
+                                  (flat ? "view-list-symbolic" :
+                                   editor->location != NULL ?
+                                   "nautilus-folder-search-symbolic" :
+                                   "edit-find-symbolic"));
+    gtk_text_set_placeholder_text (GTK_TEXT (editor->text),
+                                   (flat ? _("Filter all files in subfolders") :
+                                    editor->location != NULL ?
+                                    _("Search current folder") :
+                                    _("Search everywhere")));
+}
+
+static void
 create_query (NautilusQueryEditor *editor)
 {
     g_return_if_fail (editor->query == NULL);
@@ -791,14 +808,7 @@ nautilus_query_editor_set_location (NautilusQueryEditor *editor,
     update_fts_sensitivity (editor);
     update_search_information (editor);
 
-    gtk_image_set_from_icon_name (GTK_IMAGE (editor->prefix_icon),
-                                  (editor->location != NULL ?
-                                   "nautilus-folder-search-symbolic" :
-                                   "edit-find-symbolic"));
-    gtk_text_set_placeholder_text (GTK_TEXT (editor->text),
-                                   (editor->location != NULL ?
-                                    _("Search current folder") :
-                                    _("Search everywhere")));
+    update_prompt (editor);
 
     if (should_notify)
     {
@@ -838,6 +848,7 @@ nautilus_query_editor_set_query (NautilusQueryEditor *self,
 
     if (g_set_object (&self->query, query))
     {
+        update_prompt (self);
         if (query == NULL)
         {
             nautilus_search_popover_reset_mime_types (NAUTILUS_SEARCH_POPOVER (self->popover));

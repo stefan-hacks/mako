@@ -105,6 +105,10 @@
         <attribute name="label" translatable="yes">_Columns</attribute>
       </item>
       <item>
+        <attribute name="action">win.flat-view</attribute>
+        <attribute name="label" translatable="yes">_Flat View</attribute>
+      </item>
+      <item>
         <attribute name="action">win.inspector-visible</attribute>
         <attribute name="label" translatable="yes">_Inspector</attribute>
       </item>

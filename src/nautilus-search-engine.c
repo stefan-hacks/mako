@@ -89,9 +89,14 @@ search_engine_start_real (NautilusSearchEngine *self)
     self->providers_finished = 0;
 
     self->starting = TRUE;
-    search_engine_start_provider (self->localsearch, self);
-    search_engine_start_provider (self->model, self);
-    search_engine_start_provider (self->recent, self);
+    /* Flat view walks the folders itself; the others would add hits from
+     * elsewhere or folders. */
+    if (!nautilus_query_get_flat (self->query))
+    {
+        search_engine_start_provider (self->localsearch, self);
+        search_engine_start_provider (self->model, self);
+        search_engine_start_provider (self->recent, self);
+    }
     search_engine_start_provider (self->simple, self);
     self->starting = FALSE;
 

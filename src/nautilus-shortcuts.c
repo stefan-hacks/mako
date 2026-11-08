@@ -21,7 +21,11 @@
 #include <adwaita.h>
 #include <glib/gi18n.h>
 
+#include "nautilus-application.h"
+#include "nautilus-bookmark.h"
+#include "nautilus-bookmark-list.h"
 #include "nautilus-labels.h"
+#include "nautilus-window-slot.h"
 
 typedef struct
 {
@@ -91,6 +95,7 @@ static const Command commands[] =
     { SECTION_VIEW, N_("List View"), "win.view-mode(uint32 1)", "<ctrl>1", "<alt>1" },
     { SECTION_VIEW, N_("Columns View"), "win.view-mode(uint32 2)", NULL, "<alt>2" },
     { SECTION_VIEW, N_("Grid View"), "win.view-mode(uint32 3)", "<ctrl>2", "<alt>3" },
+    { SECTION_VIEW, N_("Flat View"), "win.flat-view", NULL, "<alt>f" },
     { SECTION_VIEW, N_("Next View"), "win.view-step(1)", NULL, NULL },
     { SECTION_VIEW, N_("Previous View"), "win.view-step(-1)", NULL, NULL },
     { SECTION_VIEW, N_("Zoom In"), "view.zoom-in", "<ctrl>plus", "<ctrl><alt>w" },
@@ -98,7 +103,12 @@ static const Command commands[] =
     { SECTION_VIEW, N_("Reset Zoom"), "view.zoom-standard", "<ctrl>0", NULL },
     { SECTION_VIEW, N_("Show Hidden Files"), "view.show-hidden-files", "<ctrl>h", "<alt>v" },
     { SECTION_VIEW, N_("Show Inspector"), "win.inspector-visible", NULL, "F4" },
-    { SECTION_VIEW, N_("Move Inspector"), "win.inspector-side-next", NULL, "<shift>F4" },
+    { SECTION_VIEW, N_("Move Inspector Clockwise"), "win.inspector-side-next", NULL, "<shift>F4" },
+    { SECTION_VIEW, N_("Move Inspector Counterclockwise"), "win.inspector-side-previous", NULL, "<ctrl><shift>F4" },
+    { SECTION_VIEW, N_("Inspector on the Right"), "win.inspector-side('right')", NULL, NULL },
+    { SECTION_VIEW, N_("Inspector at the Bottom"), "win.inspector-side('bottom')", NULL, NULL },
+    { SECTION_VIEW, N_("Inspector on the Left"), "win.inspector-side('left')", NULL, NULL },
+    { SECTION_VIEW, N_("Inspector at the Top"), "win.inspector-side('top')", NULL, NULL },
     { SECTION_VIEW, N_("Next Grouping"), "view.group-by-next", NULL, "<ctrl>g" },
     { SECTION_VIEW, N_("Group by Date"), "view.group-by('date')", NULL, NULL },
     { SECTION_VIEW, N_("Group by First Letter"), "view.group-by('name')", NULL, NULL },
@@ -115,7 +125,8 @@ static const Command commands[] =
     { SECTION_ORGANIZE, N_("Tags"), "view.edit-tags", "<ctrl><alt>a", NULL },
     { SECTION_ORGANIZE, N_("Ratings and Tags on Grid Items"), "view.toggle-marks-on-tiles", "<ctrl><shift>r", NULL },
 
-    { SECTION_APP, N_("Keyboard Shortcuts"), "win.keyboard-shortcuts", NULL, "F1|<ctrl>question" },
+    { SECTION_APP, N_("Commands and Shortcuts"), "win.keyboard-shortcuts", NULL,
+      "F1|<ctrl>k|<ctrl><shift>p|<ctrl>question" },
     { SECTION_APP, N_("Help"), "app.help", "<shift>F1", NULL },
     { SECTION_APP, N_("Preferences"), "app.preferences", "<ctrl>comma", NULL },
     { SECTION_APP, N_("Main Menu"), "win.current-location-menu", "F10", NULL },
@@ -467,6 +478,7 @@ typedef struct
     int recording_slot;
     AdwDialog *recorder;
     guint rebuild_idle;
+    guint select_idle;
 } Overview;
 
 static void rebuild_rows (Overview *overview);
@@ -475,6 +487,7 @@ static void
 overview_free (Overview *overview)
 {
     g_clear_handle_id (&overview->rebuild_idle, g_source_remove);
+    g_clear_handle_id (&overview->select_idle, g_source_remove);
     g_free (overview);
 }
 
@@ -508,7 +521,22 @@ on_row_activated (GtkListBox    *list,
                   Overview      *overview)
 {
     const Command *command = g_object_get_data (G_OBJECT (row), "command");
+    GFile *location = g_object_get_data (G_OBJECT (row), "location");
     GtkWindow *window = overview->window;
+
+    if (location != NULL)
+    {
+        g_autoptr (NautilusWindowSlot) slot = NULL;
+        g_autoptr (GFile) keep = g_object_ref (location);
+
+        g_object_get (window, "active-slot", &slot, NULL);
+        adw_dialog_close (overview->dialog);
+        if (slot != NULL)
+        {
+            nautilus_window_slot_open_location_full (slot, keep, NULL);
+        }
+        return;
+    }
 
     if (command == NULL)
     {
@@ -867,6 +895,131 @@ basic_row (guint i)
     return row;
 }
 
+/* ---------------------------------------------------- Go To rows */
+
+static GtkWidget *
+place_row (GFile      *location,
+           const char *name,
+           const char *icon_name,
+           guint       order)
+{
+    GtkWidget *row = gtk_list_box_row_new ();
+    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *title = gtk_label_new (name);
+    g_autofree char *path = g_file_get_parse_name (location);
+    GtkWidget *where = gtk_label_new (path);
+    g_autofree char *search = g_strdup_printf ("%s %s", name, path);
+
+    gtk_box_append (GTK_BOX (box), gtk_image_new_from_icon_name (icon_name));
+    gtk_label_set_xalign (GTK_LABEL (title), 0);
+    gtk_box_append (GTK_BOX (box), title);
+    gtk_label_set_xalign (GTK_LABEL (where), 1);
+    gtk_label_set_ellipsize (GTK_LABEL (where), PANGO_ELLIPSIZE_START);
+    gtk_widget_set_hexpand (where, TRUE);
+    gtk_widget_add_css_class (where, "dim-label");
+    gtk_box_append (GTK_BOX (box), where);
+
+    gtk_widget_set_margin_start (box, 12);
+    gtk_widget_set_margin_end (box, 12);
+    gtk_widget_set_margin_top (box, 9);
+    gtk_widget_set_margin_bottom (box, 9);
+    gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), box);
+
+    g_object_set_data_full (G_OBJECT (row), "location", g_object_ref (location), g_object_unref);
+    g_object_set_data (G_OBJECT (row), "section", (gpointer) _("Go To"));
+    g_object_set_data (G_OBJECT (row), "order", GUINT_TO_POINTER (order));
+    g_object_set_data_full (G_OBJECT (row), "search", g_steal_pointer (&search), g_free);
+
+    return row;
+}
+
+static gint
+by_modified (gconstpointer a,
+             gconstpointer b)
+{
+    GDateTime *ta = gtk_recent_info_get_modified ((GtkRecentInfo *) a);
+    GDateTime *tb = gtk_recent_info_get_modified ((GtkRecentInfo *) b);
+
+    return -g_date_time_compare (ta, tb);
+}
+
+/* Home and the standard folders, bookmarks, then folders of recent files. */
+static void
+append_places (Overview *overview,
+               guint    *order)
+{
+    static const GUserDirectory dirs[] =
+    {
+        G_USER_DIRECTORY_DESKTOP, G_USER_DIRECTORY_DOCUMENTS, G_USER_DIRECTORY_DOWNLOAD,
+        G_USER_DIRECTORY_MUSIC, G_USER_DIRECTORY_PICTURES, G_USER_DIRECTORY_VIDEOS,
+    };
+    g_autoptr (GHashTable) seen = g_hash_table_new_full (g_file_hash, (GEqualFunc) g_file_equal,
+                                                         g_object_unref, NULL);
+    g_autoptr (GFile) home = g_file_new_for_path (g_get_home_dir ());
+    NautilusBookmarkList *bookmarks = nautilus_application_get_bookmarks (nautilus_application_get_default ());
+    GList *recent = gtk_recent_manager_get_items (gtk_recent_manager_get_default ());
+    guint recent_folders = 0;
+
+#define ADD_PLACE(file, name, icon) \
+        G_STMT_START { \
+            if (!g_hash_table_contains (seen, (file))) \
+            { \
+                g_hash_table_add (seen, g_object_ref (file)); \
+                gtk_list_box_append (overview->list, place_row ((file), (name), (icon), (*order)++)); \
+            } \
+        } G_STMT_END
+
+    ADD_PLACE (home, _("Home"), "user-home-symbolic");
+    for (guint i = 0; i < G_N_ELEMENTS (dirs); i++)
+    {
+        const char *path = g_get_user_special_dir (dirs[i]);
+
+        if (path != NULL && g_strcmp0 (path, g_get_home_dir ()) != 0)
+        {
+            g_autoptr (GFile) file = g_file_new_for_path (path);
+            g_autofree char *name = g_file_get_basename (file);
+
+            ADD_PLACE (file, name, "folder-symbolic");
+        }
+    }
+
+    for (GList *l = nautilus_bookmark_list_get_all (bookmarks); l != NULL; l = l->next)
+    {
+        NautilusBookmark *bookmark = l->data;
+
+        ADD_PLACE (nautilus_bookmark_get_location (bookmark), nautilus_bookmark_get_name (bookmark),
+                   "user-bookmarks-symbolic");
+    }
+
+    recent = g_list_sort (recent, by_modified);
+    for (GList *l = recent; l != NULL && recent_folders < 8; l = l->next)
+    {
+        const char *uri = gtk_recent_info_get_uri (l->data);
+        g_autoptr (GFile) file = NULL;
+        g_autoptr (GFile) parent = NULL;
+        g_autofree char *name = NULL;
+
+        if (!g_str_has_prefix (uri, "file://"))
+        {
+            continue;
+        }
+
+        file = g_file_new_for_uri (uri);
+        parent = g_file_get_parent (file);
+        if (parent == NULL || g_hash_table_contains (seen, parent))
+        {
+            continue;
+        }
+
+        name = g_file_get_basename (parent);
+        ADD_PLACE (parent, name, "document-open-recent-symbolic");
+        recent_folders++;
+    }
+    g_list_free_full (recent, (GDestroyNotify) gtk_recent_info_unref);
+
+#undef ADD_PLACE
+}
+
 static void
 rebuild_rows (Overview *overview)
 {
@@ -877,16 +1030,89 @@ rebuild_rows (Overview *overview)
         gtk_list_box_remove (overview->list, child);
     }
 
+    guint order = 0;
+
     for (guint i = 0; i < G_N_ELEMENTS (commands); i++)
     {
-        gtk_list_box_append (overview->list, command_row (overview, &commands[i]));
+        GtkWidget *row = command_row (overview, &commands[i]);
+
+        g_object_set_data (G_OBJECT (row), "order", GUINT_TO_POINTER (order++));
+        gtk_list_box_append (overview->list, row);
     }
+    append_places (overview, &order);
     for (guint i = 0; i < G_N_ELEMENTS (basics); i++)
     {
-        gtk_list_box_append (overview->list, basic_row (i));
+        GtkWidget *row = basic_row (i);
+
+        g_object_set_data (G_OBJECT (row), "order", GUINT_TO_POINTER (order++));
+        gtk_list_box_append (overview->list, row);
     }
 
     gtk_list_box_invalidate_filter (overview->list);
+    gtk_list_box_invalidate_sort (overview->list);
+}
+
+static gboolean
+searching (Overview *overview)
+{
+    const char *query = gtk_editable_get_text (GTK_EDITABLE (overview->search));
+
+    return query != NULL && *query != '\0';
+}
+
+static gboolean
+runnable (GtkListBoxRow *row)
+{
+    return g_object_get_data (G_OBJECT (row), "command") != NULL ||
+           g_object_get_data (G_OBJECT (row), "location") != NULL;
+}
+
+/* While searching: names that start with what was typed first, then
+ * names with a word that does, then the rest (matching the key, say). */
+static guint
+rank (GtkListBoxRow *row,
+      const char    *query)
+{
+    const char *search = g_object_get_data (G_OBJECT (row), "search");
+    g_autofree char *folded_query = g_utf8_casefold (query, -1);
+    g_autofree char *folded = g_utf8_casefold (search, -1);
+    guint score = 3;
+
+    if (g_str_has_prefix (folded, folded_query))
+    {
+        score = 0;
+    }
+    else if (g_str_match_string (query, search, TRUE))
+    {
+        score = 1;
+    }
+
+    /* Things to run before the mouse list. */
+    return score * 2 + (runnable (row) ? 0 : 1);
+}
+
+static int
+sort_rows (GtkListBoxRow *a,
+           GtkListBoxRow *b,
+           gpointer       user_data)
+{
+    Overview *overview = user_data;
+    guint oa = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (a), "order"));
+    guint ob = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (b), "order"));
+
+    if (searching (overview))
+    {
+        const char *query = gtk_editable_get_text (GTK_EDITABLE (overview->search));
+        guint ra = rank (a, query);
+        guint rb = rank (b, query);
+
+        if (ra != rb)
+        {
+            return ra < rb ? -1 : 1;
+        }
+    }
+
+    return oa < ob ? -1 : (oa > ob ? 1 : 0);
 }
 
 static gboolean
@@ -921,6 +1147,15 @@ header_row (GtkListBoxRow *row,
             GtkListBoxRow *before,
             gpointer       user_data)
 {
+    Overview *overview = user_data;
+
+    /* Ranked by match while searching; sections would repeat. */
+    if (searching (overview))
+    {
+        gtk_list_box_row_set_header (row, NULL);
+        return;
+    }
+
     const char *section = g_object_get_data (G_OBJECT (row), "section");
     const char *previous = before != NULL ? g_object_get_data (G_OBJECT (before), "section") : NULL;
 
@@ -940,22 +1175,28 @@ header_row (GtkListBoxRow *row,
     gtk_list_box_row_set_header (row, label);
 }
 
-static void
-on_search_changed (GtkSearchEntry *entry,
-                   Overview       *overview)
-{
-    gtk_list_box_invalidate_filter (overview->list);
-    gtk_list_box_invalidate_headers (overview->list);
-}
-
 static GtkListBoxRow *
-first_visible_row (Overview *overview)
+next_runnable (Overview      *overview,
+               GtkListBoxRow *from,
+               gboolean       forward)
 {
-    for (GtkWidget *child = gtk_widget_get_first_child (GTK_WIDGET (overview->list));
-         child != NULL; child = gtk_widget_get_next_sibling (child))
+    GtkWidget *child;
+
+    if (from == NULL)
+    {
+        child = gtk_widget_get_first_child (GTK_WIDGET (overview->list));
+    }
+    else
+    {
+        child = forward ? gtk_widget_get_next_sibling (GTK_WIDGET (from))
+                        : gtk_widget_get_prev_sibling (GTK_WIDGET (from));
+    }
+
+    for (; child != NULL;
+         child = forward ? gtk_widget_get_next_sibling (child) : gtk_widget_get_prev_sibling (child))
     {
         if (GTK_IS_LIST_BOX_ROW (child) && gtk_widget_get_child_visible (child) &&
-            g_object_get_data (G_OBJECT (child), "command") != NULL)
+            runnable (GTK_LIST_BOX_ROW (child)))
         {
             return GTK_LIST_BOX_ROW (child);
         }
@@ -965,17 +1206,81 @@ first_visible_row (Overview *overview)
 }
 
 static void
+select_row (Overview      *overview,
+            GtkListBoxRow *row)
+{
+    if (row == NULL)
+    {
+        gtk_list_box_unselect_all (overview->list);
+        return;
+    }
+
+    gtk_list_box_select_row (overview->list, row);
+    /* Keeps the row in view without taking focus from the entry. */
+    {
+        GtkWidget *scroller = gtk_widget_get_ancestor (GTK_WIDGET (row), GTK_TYPE_SCROLLED_WINDOW);
+        graphene_rect_t bounds;
+
+        if (scroller != NULL &&
+            gtk_widget_compute_bounds (GTK_WIDGET (row), scroller, &bounds))
+        {
+            GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (scroller));
+            double page = gtk_adjustment_get_page_size (adj);
+            double value = gtk_adjustment_get_value (adj);
+
+            if (bounds.origin.y < 0)
+            {
+                gtk_adjustment_set_value (adj, value + bounds.origin.y - 6);
+            }
+            else if (bounds.origin.y + bounds.size.height > page)
+            {
+                gtk_adjustment_set_value (adj, value + bounds.origin.y + bounds.size.height - page + 6);
+            }
+        }
+    }
+}
+
+static gboolean
+select_first_idle (gpointer user_data)
+{
+    Overview *overview = user_data;
+
+    overview->select_idle = 0;
+    select_row (overview, searching (overview) ? next_runnable (overview, NULL, TRUE) : NULL);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+on_search_changed (GtkSearchEntry *entry,
+                   Overview       *overview)
+{
+    gtk_list_box_invalidate_filter (overview->list);
+    gtk_list_box_invalidate_sort (overview->list);
+    gtk_list_box_invalidate_headers (overview->list);
+    /* Once the rows are sorted and laid out. */
+    if (overview->select_idle == 0)
+    {
+        overview->select_idle = g_idle_add (select_first_idle, overview);
+    }
+}
+
+static void
 on_search_activate (GtkSearchEntry *entry,
                     Overview       *overview)
 {
-    GtkListBoxRow *row = first_visible_row (overview);
+    GtkListBoxRow *row = gtk_list_box_get_selected_row (overview->list);
 
+    if (row == NULL)
+    {
+        row = next_runnable (overview, NULL, TRUE);
+    }
     if (row != NULL)
     {
         on_row_activated (overview->list, row, overview);
     }
 }
 
+/* Up and Down pick the command Enter runs; Tab goes into the list. */
 static gboolean
 on_search_key (GtkEventControllerKey *controller,
                guint                  keyval,
@@ -983,9 +1288,24 @@ on_search_key (GtkEventControllerKey *controller,
                GdkModifierType        state,
                Overview              *overview)
 {
-    if (keyval == GDK_KEY_Down || keyval == GDK_KEY_Tab)
+    GtkListBoxRow *selected = gtk_list_box_get_selected_row (overview->list);
+
+    if (keyval == GDK_KEY_Down || keyval == GDK_KEY_Up)
     {
-        GtkListBoxRow *row = first_visible_row (overview);
+        gboolean down = keyval == GDK_KEY_Down;
+        GtkListBoxRow *row = selected != NULL ? next_runnable (overview, selected, down)
+                                              : next_runnable (overview, NULL, TRUE);
+
+        if (row != NULL)
+        {
+            select_row (overview, row);
+        }
+        return GDK_EVENT_STOP;
+    }
+
+    if (keyval == GDK_KEY_Tab)
+    {
+        GtkListBoxRow *row = selected != NULL ? selected : next_runnable (overview, NULL, TRUE);
 
         if (row != NULL)
         {
@@ -1010,12 +1330,12 @@ nautilus_shortcuts_dialog_present (GtkWindow *window)
 
     overview->window = window;
     overview->dialog = adw_dialog_new ();
-    adw_dialog_set_title (overview->dialog, _("Keyboard Shortcuts"));
+    adw_dialog_set_title (overview->dialog, _("Commands"));
     adw_dialog_set_content_width (overview->dialog, 640);
     adw_dialog_set_content_height (overview->dialog, 720);
 
     overview->search = GTK_SEARCH_ENTRY (gtk_search_entry_new ());
-    gtk_search_entry_set_placeholder_text (overview->search, _("Search commands or keys"));
+    gtk_search_entry_set_placeholder_text (overview->search, _("Run a command, go to a folder, find a key"));
     gtk_widget_set_hexpand (GTK_WIDGET (overview->search), TRUE);
     gtk_widget_set_size_request (GTK_WIDGET (overview->search), 320, -1);
     g_signal_connect (overview->search, "search-changed", G_CALLBACK (on_search_changed), overview);
@@ -1029,11 +1349,12 @@ nautilus_shortcuts_dialog_present (GtkWindow *window)
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), reset);
 
     overview->list = GTK_LIST_BOX (gtk_list_box_new ());
-    gtk_list_box_set_selection_mode (overview->list, GTK_SELECTION_NONE);
+    gtk_list_box_set_selection_mode (overview->list, GTK_SELECTION_SINGLE);
     gtk_widget_add_css_class (GTK_WIDGET (overview->list), "boxed-list-separate");
     gtk_widget_add_css_class (GTK_WIDGET (overview->list), "shortcuts-overview");
     gtk_list_box_set_filter_func (overview->list, filter_row, overview, NULL);
-    gtk_list_box_set_header_func (overview->list, header_row, NULL, NULL);
+    gtk_list_box_set_header_func (overview->list, header_row, overview, NULL);
+    gtk_list_box_set_sort_func (overview->list, sort_rows, overview, NULL);
     g_signal_connect (overview->list, "row-activated", G_CALLBACK (on_row_activated), overview);
 
     gtk_widget_set_margin_start (GTK_WIDGET (overview->list), 12);

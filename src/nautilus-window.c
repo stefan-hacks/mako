@@ -2061,6 +2061,7 @@ typedef enum
     INSPECTOR_RIGHT,
     INSPECTOR_LEFT,
     INSPECTOR_BOTTOM,
+    INSPECTOR_TOP,
 } InspectorSide;
 
 static gboolean
@@ -2130,16 +2131,17 @@ arrange_inspector (NautilusWindow *window)
     InspectorSide side = g_settings_get_enum (flier, "inspector-side");
     GtkPaned *paned = window->inspector_paned;
     GtkWidget *layout = GTK_WIDGET (window->tile_layout);
-    GtkWidget *start = side == INSPECTOR_LEFT ? window->inspector : layout;
-    GtkWidget *end = side == INSPECTOR_LEFT ? layout : window->inspector;
+    gboolean first = side == INSPECTOR_LEFT || side == INSPECTOR_TOP;
+    GtkWidget *start = first ? window->inspector : layout;
+    GtkWidget *end = first ? layout : window->inspector;
 
     g_object_ref (layout);
     g_object_ref (window->inspector);
     gtk_paned_set_start_child (paned, NULL);
     gtk_paned_set_end_child (paned, NULL);
     gtk_orientable_set_orientation (GTK_ORIENTABLE (paned),
-                                    side == INSPECTOR_BOTTOM ? GTK_ORIENTATION_VERTICAL
-                                                             : GTK_ORIENTATION_HORIZONTAL);
+                                    side == INSPECTOR_BOTTOM || side == INSPECTOR_TOP
+                                    ? GTK_ORIENTATION_VERTICAL : GTK_ORIENTATION_HORIZONTAL);
     gtk_paned_set_start_child (paned, start);
     gtk_paned_set_end_child (paned, end);
     gtk_paned_set_resize_start_child (paned, start == layout);
@@ -2160,15 +2162,42 @@ on_active_slot_for_inspector (NautilusWindow *window)
     nautilus_inspector_set_slot (NAUTILUS_INSPECTOR (window->inspector), window->active_slot);
 }
 
+/* Around the window: right, bottom, left, top. */
+static void
+move_inspector (gboolean clockwise)
+{
+    static const InspectorSide order[] = { INSPECTOR_RIGHT, INSPECTOR_BOTTOM, INSPECTOR_LEFT, INSPECTOR_TOP };
+    GSettings *flier = nautilus_flier_settings ();
+    InspectorSide side = g_settings_get_enum (flier, "inspector-side");
+    guint at = 0;
+
+    for (guint i = 0; i < G_N_ELEMENTS (order); i++)
+    {
+        if (order[i] == side)
+        {
+            at = i;
+        }
+    }
+
+    at = (at + (clockwise ? 1 : G_N_ELEMENTS (order) - 1)) % G_N_ELEMENTS (order);
+    g_settings_set_enum (flier, "inspector-side", order[at]);
+    g_settings_set_boolean (flier, "inspector-visible", TRUE);
+}
+
 static void
 action_inspector_side_next (GSimpleAction *action,
                             GVariant      *parameter,
                             gpointer       user_data)
 {
-    GSettings *flier = nautilus_flier_settings ();
+    move_inspector (TRUE);
+}
 
-    g_settings_set_enum (flier, "inspector-side", (g_settings_get_enum (flier, "inspector-side") + 1) % 3);
-    g_settings_set_boolean (flier, "inspector-visible", TRUE);
+static void
+action_inspector_side_previous (GSimpleAction *action,
+                                GVariant      *parameter,
+                                gpointer       user_data)
+{
+    move_inspector (FALSE);
 }
 
 static void
@@ -2180,6 +2209,11 @@ sync_view_mode (NautilusWindow *window)
                  NAUTILUS_COLUMNS_MODE_LIST;
 
     g_simple_action_set_state (G_SIMPLE_ACTION (action), g_variant_new_uint32 (mode));
+
+    action = g_action_map_lookup_action (G_ACTION_MAP (window), "flat-view");
+    g_simple_action_set_state (G_SIMPLE_ACTION (action),
+                               g_variant_new_boolean (window->mode_columns != NULL &&
+                                                      nautilus_columns_get_flat (NAUTILUS_COLUMNS (window->mode_columns))));
 }
 
 static void
@@ -2202,6 +2236,8 @@ on_active_slot_for_view_mode (NautilusWindow *window)
     {
         g_signal_connect_object (columns, "notify::mode", G_CALLBACK (sync_view_mode), window,
                                  G_CONNECT_SWAPPED);
+        g_signal_connect_object (columns, "notify::flat", G_CALLBACK (sync_view_mode), window,
+                                 G_CONNECT_SWAPPED);
     }
     sync_view_mode (window);
 }
@@ -2218,6 +2254,19 @@ action_view_mode (GSimpleAction *action,
         nautilus_columns_set_mode (NAUTILUS_COLUMNS (window->mode_columns),
                                    CLAMP (g_variant_get_uint32 (value),
                                           NAUTILUS_COLUMNS_MODE_LIST, NAUTILUS_COLUMNS_MODE_GRID));
+    }
+}
+
+static void
+action_flat_view (GSimpleAction *action,
+                  GVariant      *value,
+                  gpointer       user_data)
+{
+    NautilusWindow *window = NAUTILUS_WINDOW (user_data);
+
+    if (window->mode_columns != NULL)
+    {
+        nautilus_columns_set_flat (NAUTILUS_COLUMNS (window->mode_columns), g_variant_get_boolean (value));
     }
 }
 
@@ -2240,11 +2289,14 @@ setup_inspector (NautilusWindow *window)
     GtkWidget *layout = GTK_WIDGET (window->tile_layout);
     GtkWidget *parent = gtk_widget_get_parent (layout);
     g_autoptr (GAction) visible = g_settings_create_action (nautilus_flier_settings (), "inspector-visible");
+    g_autoptr (GAction) side = g_settings_create_action (nautilus_flier_settings (), "inspector-side");
     static const GActionEntry entries[] =
     {
         { .name = "inspector-side-next", .activate = action_inspector_side_next },
+        { .name = "inspector-side-previous", .activate = action_inspector_side_previous },
         { .name = "view-mode", .parameter_type = "u", .state = "uint32 1", .change_state = action_view_mode },
         { .name = "view-step", .parameter_type = "i", .activate = action_view_step },
+        { .name = "flat-view", .state = "false", .change_state = action_flat_view },
     };
 
     window->inspector = nautilus_inspector_new ();
@@ -2260,6 +2312,7 @@ setup_inspector (NautilusWindow *window)
     arrange_inspector (window);
 
     g_action_map_add_action (G_ACTION_MAP (window), visible);
+    g_action_map_add_action (G_ACTION_MAP (window), side);
     g_action_map_add_action_entries (G_ACTION_MAP (window), entries, G_N_ELEMENTS (entries), window);
     g_signal_connect (window, "notify::active-slot", G_CALLBACK (on_active_slot_for_view_mode), NULL);
 

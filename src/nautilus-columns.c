@@ -23,6 +23,7 @@
 #include "nautilus-files-view.h"
 #include "nautilus-labels.h"
 #include "nautilus-list-base.h"
+#include "nautilus-query.h"
 #include "nautilus-view-info.h"
 #include "nautilus-window-slot.h"
 
@@ -53,6 +54,7 @@ struct _NautilusColumns
     /* Columns mode, per tab. New tabs start the way the last one was set. */
     gboolean enabled;
     guint mode;
+    gboolean flat;
     double wheel_amount;
     gint64 wheel_quiet_until;
 };
@@ -61,6 +63,7 @@ enum
 {
     PROP_0,
     PROP_MODE,
+    PROP_FLAT,
     N_PROPS
 };
 
@@ -514,6 +517,84 @@ nautilus_columns_set_mode (NautilusColumns *self,
     on_view_changed (self);
 }
 
+/* ---------------------------------------------------------------- Flat view */
+
+static NautilusQuery *
+search_query (NautilusColumns *self)
+{
+    NautilusFilesView *view = files_view (self);
+
+    if (view == NULL || !nautilus_window_slot_get_search_visible (self->slot))
+    {
+        return NULL;
+    }
+
+    return nautilus_files_view_get_search_query (view);
+}
+
+static void
+update_flat (NautilusColumns *self)
+{
+    NautilusQuery *query = search_query (self);
+    gboolean flat = query != NULL && nautilus_query_get_flat (query);
+
+    if (flat != self->flat)
+    {
+        self->flat = flat;
+        g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_FLAT]);
+    }
+}
+
+gboolean
+nautilus_columns_get_flat (NautilusColumns *self)
+{
+    return self->flat;
+}
+
+void
+nautilus_columns_set_flat (NautilusColumns *self,
+                           gboolean         flat)
+{
+    NautilusQuery *current = search_query (self);
+    g_autoptr (NautilusQuery) query = NULL;
+    g_autoptr (GFile) folder = NULL;
+
+    if (self->slot == NULL || flat == self->flat)
+    {
+        return;
+    }
+
+    if (!flat)
+    {
+        /* Back to the folder. */
+        g_object_set (self->slot, "search-visible", FALSE, NULL);
+        return;
+    }
+
+    /* A search running already keeps its text, as the filter. */
+    if (current != NULL)
+    {
+        query = nautilus_query_copy (current);
+    }
+    else
+    {
+        query = nautilus_query_new ();
+        nautilus_query_set_location (query, nautilus_window_slot_get_location (self->slot));
+    }
+
+    folder = nautilus_query_get_location (query);
+    if (folder == NULL)
+    {
+        /* Search everywhere has no folder to flatten. */
+        return;
+    }
+
+    nautilus_query_set_flat (query, TRUE);
+    nautilus_window_slot_search (self->slot, query);
+    /* The search shows before the view has the query. */
+    update_flat (self);
+}
+
 /* Like the wheel: list, columns, grid, then bigger grid items; and back. */
 void
 nautilus_columns_step (NautilusColumns *self,
@@ -730,6 +811,12 @@ nautilus_columns_get_property (GObject    *object,
         }
         break;
 
+        case PROP_FLAT:
+        {
+            g_value_set_boolean (value, NAUTILUS_COLUMNS (object)->flat);
+        }
+        break;
+
         default:
         {
             G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -766,6 +853,8 @@ nautilus_columns_class_init (NautilusColumnsClass *klass)
                                                NAUTILUS_COLUMNS_MODE_LIST, NAUTILUS_COLUMNS_MODE_GRID,
                                                NAUTILUS_COLUMNS_MODE_LIST,
                                                G_PARAM_READABLE | G_PARAM_STATIC_STRINGS | G_PARAM_EXPLICIT_NOTIFY);
+    properties[PROP_FLAT] = g_param_spec_boolean ("flat", NULL, NULL, FALSE,
+                                                  G_PARAM_READABLE | G_PARAM_STATIC_STRINGS | G_PARAM_EXPLICIT_NOTIFY);
     g_object_class_install_properties (G_OBJECT_CLASS (klass), N_PROPS, properties);
     gtk_widget_class_set_layout_manager_type (GTK_WIDGET_CLASS (klass), GTK_TYPE_BOX_LAYOUT);
     gtk_widget_class_set_css_name (GTK_WIDGET_CLASS (klass), "nautilus-columns");
@@ -778,6 +867,10 @@ nautilus_columns_new (NautilusWindowSlot *slot)
 
     g_set_weak_pointer (&self->slot, slot);
     g_signal_connect_object (slot, "notify::location", G_CALLBACK (schedule_update), self,
+                             G_CONNECT_SWAPPED);
+    g_signal_connect_object (slot, "notify::location", G_CALLBACK (update_flat), self,
+                             G_CONNECT_SWAPPED);
+    g_signal_connect_object (slot, "notify::search-visible", G_CALLBACK (update_flat), self,
                              G_CONNECT_SWAPPED);
     g_signal_connect_object (slot, "notify::selection", G_CALLBACK (schedule_update), self,
                              G_CONNECT_SWAPPED);

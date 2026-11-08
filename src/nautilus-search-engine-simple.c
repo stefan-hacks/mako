@@ -43,7 +43,11 @@ struct _NautilusSearchEngineSimple
     GHashTable *visited;
 
     gint64 last_saved_time;
+    guint hits;
 };
+
+/* Flat view stops there, like File Flier. */
+#define FLAT_MAX_FILES 200000
 
 G_DEFINE_FINAL_TYPE (NautilusSearchEngineSimple,
                      nautilus_search_engine_simple,
@@ -111,6 +115,7 @@ visit_directory (NautilusSearchEngineSimple *self,
     gboolean show_hidden = nautilus_query_get_show_hidden_files (query);
     gboolean recursion_enabled = nautilus_query_recursive (query);
     gboolean per_location_recursive_check = nautilus_query_recursive_local_only (query);
+    gboolean flat = nautilus_query_get_flat (query);
 
     GFileInfo *info;
     while (g_file_enumerator_iterate (enumerator, &info, NULL, cancellable, NULL) &&
@@ -134,6 +139,11 @@ visit_directory (NautilusSearchEngineSimple *self,
         gdouble match = nautilus_query_matches_string (query, display_name);
         gboolean found = (match > -1);
         gint64 current_time;
+
+        if (flat && g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
+        {
+            found = FALSE;
+        }
 
         if (found && nautilus_query_has_mime_types (query))
         {
@@ -200,6 +210,12 @@ visit_directory (NautilusSearchEngineSimple *self,
             nautilus_search_hit_set_creation_time (hit, ctime);
 
             nautilus_search_provider_add_hit (self, hit);
+
+            if (flat && ++self->hits >= FLAT_MAX_FILES)
+            {
+                g_queue_clear_full (self->directories, (GDestroyNotify) g_object_unref);
+                break;
+            }
         }
 
         current_time = g_get_monotonic_time ();
@@ -234,6 +250,8 @@ search_thread_func (NautilusSearchEngineSimple *self)
 {
     GCancellable *cancellable = nautilus_search_provider_get_cancellable (self);
     NautilusQuery *query = nautilus_search_provider_get_query (self);
+
+    self->hits = 0;
 
     /* Insert id for toplevel directory into visited */
     g_autoptr (GFile) toplevel = nautilus_query_get_location (query);

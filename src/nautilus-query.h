@@ -68,6 +68,12 @@ GPtrArray*     nautilus_query_get_date_range     (NautilusQuery *query);
 void           nautilus_query_set_date_range     (NautilusQuery *query,
                                                   GPtrArray     *date_range);
 
+/* Flat view: all files below the location, folders left out; the text,
+ * if any, filters them. Only the simple engine runs it. */
+gboolean       nautilus_query_get_flat           (NautilusQuery *self);
+void           nautilus_query_set_flat           (NautilusQuery *self,
+                                                  gboolean       flat);
+
 gboolean
 nautilus_query_recursive (NautilusQuery *self);
 gboolean

@@ -50,6 +50,8 @@ struct _NautilusQuery
     NautilusSpeedTradeoffValue recursion_tradeoff;
     NautilusSearchTimeType search_type;
     gboolean search_content;
+    /* Flat view: every file below the location, the text only filters. */
+    gboolean flat;
 
     GPtrArray *prepared_words;
 };
@@ -196,6 +198,7 @@ nautilus_query_copy (NautilusQuery *query)
     copy->recursion_tradeoff = query->recursion_tradeoff;
     copy->search_type = query->search_type;
     copy->search_content = query->search_content;
+    copy->flat = query->flat;
     g_set_ptr_array (&copy->prepared_words, query->prepared_words);
 
     return copy;
@@ -464,14 +467,14 @@ nautilus_query_set_date_range (NautilusQuery *query,
 gboolean
 nautilus_query_recursive (NautilusQuery *self)
 {
-    return self->recursion_tradeoff != NAUTILUS_SPEED_TRADEOFF_NEVER;
+    return self->flat || self->recursion_tradeoff != NAUTILUS_SPEED_TRADEOFF_NEVER;
 }
 
 /** Returns: whether recursive search is only enabled for local paths */
 gboolean
 nautilus_query_recursive_local_only (NautilusQuery *self)
 {
-    return self->recursion_tradeoff == NAUTILUS_SPEED_TRADEOFF_LOCAL_ONLY;
+    return !self->flat && self->recursion_tradeoff == NAUTILUS_SPEED_TRADEOFF_LOCAL_ONLY;
 }
 
 /**
@@ -496,6 +499,19 @@ nautilus_query_has_active_filter (NautilusQuery *self)
 }
 
 gboolean
+nautilus_query_get_flat (NautilusQuery *self)
+{
+    return self->flat;
+}
+
+void
+nautilus_query_set_flat (NautilusQuery *self,
+                         gboolean       flat)
+{
+    self->flat = flat;
+}
+
+gboolean
 nautilus_query_is_empty (NautilusQuery *query)
 {
     if (!query)
@@ -504,6 +520,7 @@ nautilus_query_is_empty (NautilusQuery *query)
     }
 
     if (!query->date_range &&
+        !query->flat &&
         query->text == NULL &&
         query->mime_types->len == 0)
     {

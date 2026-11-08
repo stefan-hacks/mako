@@ -36,4 +36,10 @@ void       nautilus_columns_step        (NautilusColumns    *self,
 void       nautilus_columns_set_content (NautilusColumns    *self,
                                          GtkWidget          *content);
 
+/* The "flat" property: every file below the folder in one list, as a search
+ * whose text filters it. */
+gboolean   nautilus_columns_get_flat    (NautilusColumns    *self);
+void       nautilus_columns_set_flat    (NautilusColumns    *self,
+                                         gboolean            flat);
+
 G_END_DECLS

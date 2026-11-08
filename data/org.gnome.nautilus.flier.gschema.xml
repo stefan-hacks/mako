@@ -12,6 +12,7 @@
     <value value="0" nick="right"/>
     <value value="1" nick="left"/>
     <value value="2" nick="bottom"/>
+    <value value="3" nick="top"/>
   </enum>
 
   <!-- Settings for the features carried over from File Flier. Kept apart from
