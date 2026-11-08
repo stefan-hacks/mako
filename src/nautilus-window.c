@@ -63,6 +63,7 @@
 #include "nautilus-scheme.h"
 #include "nautilus-shortcut-manager.h"
 #include "nautilus-sidebar.h"
+#include "nautilus-tile-layout.h"
 #include "nautilus-signaller.h"
 #include "nautilus-toolbar.h"
 #include "nautilus-trash-monitor.h"
@@ -78,6 +79,13 @@ static void update_cursor (NautilusWindow *window);
 static void
 set_active_slot (NautilusWindow     *window,
                  NautilusWindowSlot *new_slot);
+static void set_active_tile (NautilusWindow *window,
+                             NautilusTile   *tile);
+static void schedule_tile_collapse (NautilusWindow *window,
+                                    NautilusTile   *tile);
+static AdwTabView *take_pending_tab_drop_view (void);
+static NautilusTile *create_tile (NautilusWindow *window);
+static AdwTabPage *dropped_page;
 
 /* Sanity check: highest mouse button value I could find was 14. 5 is our
  * lower threshold (well-documented to be the one of the button events for the
@@ -93,9 +101,13 @@ struct _NautilusWindow
 
     GMenuModel *undo_redo_section;
 
+    /* The active tile's tab view and bar. Every tile has its own. */
     AdwTabView *tab_view;
     AdwTabBar *tab_bar;
     AdwTabPage *menu_page;
+    NautilusTileLayout *tile_layout;
+    GMenuModel *tab_menu_model;
+    gboolean tab_bar_inverted;
 
     GList *slots;
     NautilusWindowSlot *active_slot; /* weak reference */
@@ -185,7 +197,7 @@ action_close_current_view (GSimpleAction *action,
     NautilusWindow *window = user_data;
     AdwTabPage *page = get_current_page (window);
 
-    if (adw_tab_view_get_n_pages (window->tab_view) <= 1)
+    if (window->slots == NULL || window->slots->next == NULL)
     {
         nautilus_window_close (window);
         return;
@@ -358,6 +370,13 @@ tab_view_notify_selected_page_cb (AdwTabView     *tab_view,
                                   NautilusWindow *window)
 {
     AdwTabPage *page = adw_tab_view_get_selected_page (tab_view);
+
+    /* Other tiles keep their own selection; an empty tile has none. */
+    if (tab_view != window->tab_view || page == NULL)
+    {
+        return;
+    }
+
     NautilusWindowSlot *slot = NAUTILUS_WINDOW_SLOT (adw_tab_page_get_child (page));
 
     g_return_if_fail (slot != NULL);
@@ -687,9 +706,11 @@ window_slot_close (NautilusWindow     *window,
 
     remove_slot_from_window (slot, window);
 
-    page = adw_tab_view_get_page (window->tab_view, GTK_WIDGET (slot));
+    AdwTabView *view = ADW_TAB_VIEW (gtk_widget_get_ancestor (GTK_WIDGET (slot), ADW_TYPE_TAB_VIEW));
+
+    page = adw_tab_view_get_page (view, GTK_WIDGET (slot));
     /* this will destroy the slot */
-    adw_tab_view_close_page (window->tab_view, page);
+    adw_tab_view_close_page (view, page);
 
     /* If that was the last slot in the window, close the window. */
     if (window->slots == NULL)
@@ -973,6 +994,11 @@ tab_view_page_detached_cb (AdwTabView     *tab_view,
     {
         remove_slot_from_window (slot, window);
     }
+
+    if (adw_tab_view_get_n_pages (tab_view) == 0)
+    {
+        schedule_tile_collapse (window, nautilus_tile_for_widget (GTK_WIDGET (tab_view)));
+    }
 }
 
 static void
@@ -985,6 +1011,14 @@ tab_view_page_attached_cb (AdwTabView     *tab_view,
 
     window->slots = g_list_prepend (window->slots, slot);
 
+    if (page == dropped_page)
+    {
+        g_clear_weak_pointer (&dropped_page);
+        set_active_tile (window, nautilus_tile_for_widget (GTK_WIDGET (tab_view)));
+        adw_tab_view_set_selected_page (tab_view, page);
+        set_active_slot (window, slot);
+    }
+
     g_signal_emit (window, signals[LOCATIONS_CHANGED], 0);
 }
 
@@ -994,6 +1028,14 @@ tab_view_create_window_cb (AdwTabView     *tab_view,
 {
     NautilusApplication *app;
     NautilusWindow *new_window;
+
+    /* libadwaita asks for a new window after a drop outside its tab bars;
+     * a tab dropped on a tile goes to that tile instead. */
+    AdwTabView *tile_view = take_pending_tab_drop_view ();
+    if (tile_view != NULL)
+    {
+        return tile_view;
+    }
 
     app = NAUTILUS_APPLICATION (g_application_get_default ());
     new_window = nautilus_application_create_window (app, NULL);
@@ -1018,26 +1060,434 @@ action_tab_move_new_window (GSimpleAction *action,
 }
 
 static void
-setup_tab_view (NautilusWindow *window)
+setup_tab_view (NautilusWindow *window,
+                AdwTabView     *tab_view)
 {
-    g_signal_connect (window->tab_view, "close-page",
+    g_signal_connect (tab_view, "close-page",
                       G_CALLBACK (tab_view_close_page_cb),
                       window);
-    g_signal_connect (window->tab_view, "setup-menu",
+    g_signal_connect (tab_view, "setup-menu",
                       G_CALLBACK (tab_view_setup_menu_cb),
                       window);
-    g_signal_connect (window->tab_view, "notify::selected-page",
+    g_signal_connect (tab_view, "notify::selected-page",
                       G_CALLBACK (tab_view_notify_selected_page_cb),
                       window);
-    g_signal_connect (window->tab_view, "create-window",
+    g_signal_connect (tab_view, "create-window",
                       G_CALLBACK (tab_view_create_window_cb),
                       window);
-    g_signal_connect (window->tab_view, "page-attached",
+    g_signal_connect (tab_view, "page-attached",
                       G_CALLBACK (tab_view_page_attached_cb),
                       window);
-    g_signal_connect (window->tab_view, "page-detached",
+    g_signal_connect (tab_view, "page-detached",
                       G_CALLBACK (tab_view_page_detached_cb),
                       window);
+}
+
+/* ------------------------------------------------------------------ Tiles
+ *
+ * The window's content is a layout of tiles, each a tab bar over a tab view.
+ * window->tab_view is the active tile's view: new tabs and tab actions go
+ * there, and the toolbar follows its selected slot.
+ */
+
+static AdwTabPage *dropped_page = NULL; /* weak: select it once it lands */
+
+/* A tab dropped on a tile, waiting for libadwaita's create-window request
+ * (see take_pending_tab_drop_view()). */
+static struct
+{
+    NautilusWindow *window; /* weak */
+    NautilusTile *tile;     /* weak */
+    NautilusTileDrop where;
+} pending_tab_drop;
+
+static GdkDragAction extra_drag_value_cb (AdwTabBar    *self,
+                                          AdwTabPage   *page,
+                                          const GValue *value,
+                                          gpointer      user_data);
+static gboolean extra_drag_drop_cb (AdwTabBar    *self,
+                                    AdwTabPage   *page,
+                                    const GValue *value,
+                                    gpointer      user_data);
+
+/* Makes @tile the one new tabs and tab actions go to. */
+static void
+set_active_tile (NautilusWindow *window,
+                 NautilusTile   *tile)
+{
+    if (tile == NULL || window->tab_view == nautilus_tile_get_view (tile))
+    {
+        return;
+    }
+
+    window->tab_view = nautilus_tile_get_view (tile);
+    window->tab_bar = nautilus_tile_get_bar (tile);
+    nautilus_tile_layout_set_active (window->tile_layout, tile);
+}
+
+/* Like set_active_tile(), and the tile's selected tab becomes the active slot. */
+static void
+activate_tile (NautilusWindow *window,
+               NautilusTile   *tile)
+{
+    if (tile == NULL || window->tab_view == nautilus_tile_get_view (tile))
+    {
+        return;
+    }
+
+    set_active_tile (window, tile);
+
+    AdwTabPage *page = adw_tab_view_get_selected_page (window->tab_view);
+    if (page != NULL)
+    {
+        set_active_slot (window, NAUTILUS_WINDOW_SLOT (adw_tab_page_get_child (page)));
+    }
+}
+
+static void
+on_tile_focus_enter (GtkEventControllerFocus *controller,
+                     NautilusWindow          *window)
+{
+    activate_tile (window, NAUTILUS_TILE (gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (controller))));
+}
+
+static void
+on_tile_pressed (GtkGestureClick *gesture,
+                 int              n_press,
+                 double           x,
+                 double           y,
+                 NautilusWindow  *window)
+{
+    activate_tile (window, NAUTILUS_TILE (gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture))));
+}
+
+typedef struct
+{
+    NautilusWindow *window;
+    NautilusTile *tile;
+} TileCollapse;
+
+/* Removes a tile whose last tab was closed or dragged away. Waits while a
+ * tab drag is running, since a cancelled drag brings the tab back. */
+static gboolean
+collapse_tile_cb (gpointer user_data)
+{
+    TileCollapse *collapse = user_data;
+    NautilusWindow *window = collapse->window;
+    NautilusTile *tile = collapse->tile;
+    AdwTabView *view = nautilus_tile_get_view (tile);
+
+    if (adw_tab_view_get_is_transferring_page (view))
+    {
+        return G_SOURCE_CONTINUE;
+    }
+
+    g_object_set_data (G_OBJECT (tile), "nautilus-collapse-pending", NULL);
+
+    if (window->tile_layout != NULL &&
+        adw_tab_view_get_n_pages (view) == 0 &&
+        nautilus_tile_layout_get_n_tiles (window->tile_layout) > 1 &&
+        g_list_find (nautilus_tile_layout_get_tiles (window->tile_layout), tile) != NULL)
+    {
+        gboolean was_active = (window->tab_view == view);
+
+        nautilus_tile_layout_remove (window->tile_layout, tile);
+
+        if (was_active)
+        {
+            window->tab_view = NULL;
+            activate_tile (window, nautilus_tile_layout_get_tiles (window->tile_layout)->data);
+            if (window->active_slot != NULL)
+            {
+                gtk_widget_grab_focus (GTK_WIDGET (window->active_slot));
+            }
+        }
+    }
+
+    g_object_unref (window);
+    g_object_unref (tile);
+    g_free (collapse);
+
+    return G_SOURCE_REMOVE;
+}
+
+static void
+schedule_tile_collapse (NautilusWindow *window,
+                        NautilusTile   *tile)
+{
+    if (tile == NULL || g_object_get_data (G_OBJECT (tile), "nautilus-collapse-pending") != NULL)
+    {
+        return;
+    }
+
+    TileCollapse *collapse = g_new0 (TileCollapse, 1);
+
+    collapse->window = g_object_ref (window);
+    collapse->tile = g_object_ref (tile);
+    g_object_set_data (G_OBJECT (tile), "nautilus-collapse-pending", GINT_TO_POINTER (TRUE));
+    g_timeout_add (150, collapse_tile_cb, collapse);
+}
+
+/* The dragged tab, read straight from the in-process drag (a drop target's
+ * own value only arrives asynchronously). */
+static AdwTabPage *
+drop_dup_page (GtkDropTarget *target)
+{
+    GdkDrop *drop = gtk_drop_target_get_current_drop (target);
+    GdkDrag *drag = drop != NULL ? gdk_drop_get_drag (drop) : NULL;
+    g_auto (GValue) value = G_VALUE_INIT;
+
+    if (drag == NULL)
+    {
+        return NULL;
+    }
+
+    g_value_init (&value, ADW_TYPE_TAB_PAGE);
+    if (!gdk_content_provider_get_value (gdk_drag_get_content (drag), &value, NULL))
+    {
+        return NULL;
+    }
+
+    return g_value_dup_object (&value);
+}
+
+static gboolean
+tile_drop_pick (GtkDropTarget    *target,
+                NautilusWindow   *window,
+                double            x,
+                double            y,
+                NautilusTile    **tile,
+                NautilusTileDrop *where)
+{
+    GtkWidget *view = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (target));
+    g_autoptr (AdwTabPage) page = drop_dup_page (target);
+    graphene_point_t point;
+    graphene_rect_t zone;
+
+    *tile = nautilus_tile_for_widget (view);
+
+    if (page == NULL || *tile == NULL ||
+        !gtk_widget_compute_point (view, GTK_WIDGET (*tile), &GRAPHENE_POINT_INIT (x, y), &point))
+    {
+        nautilus_tile_layout_set_drop_zone (window->tile_layout, NULL);
+        return FALSE;
+    }
+
+    *where = nautilus_tile_layout_pick_drop (window->tile_layout, *tile, point.x, point.y, &zone);
+    nautilus_tile_layout_set_drop_zone (window->tile_layout, &zone);
+
+    return TRUE;
+}
+
+static GdkDragAction
+tile_drop_enter_cb (GtkDropTarget  *target,
+                    double          x,
+                    double          y,
+                    NautilusWindow *window)
+{
+    NautilusTile *tile;
+    NautilusTileDrop where;
+
+    /* A new drag: forget a drop that never got its create-window request. */
+    g_clear_weak_pointer (&pending_tab_drop.window);
+    g_clear_weak_pointer (&pending_tab_drop.tile);
+
+    return tile_drop_pick (target, window, x, y, &tile, &where) ? GDK_ACTION_MOVE : 0;
+}
+
+static GdkDragAction
+tile_drop_motion_cb (GtkDropTarget  *target,
+                     double          x,
+                     double          y,
+                     NautilusWindow *window)
+{
+    NautilusTile *tile;
+    NautilusTileDrop where;
+
+    return tile_drop_pick (target, window, x, y, &tile, &where) ? GDK_ACTION_MOVE : 0;
+}
+
+static void
+tile_drop_leave_cb (GtkDropTarget  *target,
+                    NautilusWindow *window)
+{
+    nautilus_tile_layout_set_drop_zone (window->tile_layout, NULL);
+}
+
+static gboolean
+tile_drop_cb (GtkDropTarget  *target,
+              const GValue   *value,
+              double          x,
+              double          y,
+              NautilusWindow *window)
+{
+    g_autoptr (AdwTabPage) page = drop_dup_page (target);
+    NautilusTile *tile;
+    NautilusTileDrop where;
+
+    if (page == NULL || !tile_drop_pick (target, window, x, y, &tile, &where))
+    {
+        return FALSE;
+    }
+
+    nautilus_tile_layout_set_drop_zone (window->tile_layout, NULL);
+
+    /* libadwaita detached the page when the drag began. After this drop it
+     * asks for a new window to put it in; we hand it the tile instead. */
+    g_set_weak_pointer (&pending_tab_drop.window, window);
+    g_set_weak_pointer (&pending_tab_drop.tile, tile);
+    pending_tab_drop.where = where;
+    g_set_weak_pointer (&dropped_page, page);
+
+    return TRUE;
+}
+
+static AdwTabView *
+take_pending_tab_drop_view (void)
+{
+    NautilusWindow *window = pending_tab_drop.window;
+    NautilusTile *tile = pending_tab_drop.tile;
+    NautilusTileDrop where = pending_tab_drop.where;
+
+    g_clear_weak_pointer (&pending_tab_drop.window);
+    g_clear_weak_pointer (&pending_tab_drop.tile);
+
+    if (window == NULL || tile == NULL)
+    {
+        return NULL;
+    }
+
+    if (where == NAUTILUS_TILE_DROP_CENTER)
+    {
+        return nautilus_tile_get_view (tile);
+    }
+
+    NautilusTile *new_tile = create_tile (window);
+
+    nautilus_tile_layout_split (window->tile_layout, tile, new_tile, where);
+
+    return nautilus_tile_get_view (new_tile);
+}
+
+static NautilusTile *
+create_tile (NautilusWindow *window)
+{
+    NautilusTile *tile = nautilus_tile_new (window->tab_menu_model);
+    AdwTabView *view = nautilus_tile_get_view (tile);
+    AdwTabBar *bar = nautilus_tile_get_bar (tile);
+
+    setup_tab_view (window, view);
+    adw_tab_bar_set_inverted (bar, window->tab_bar_inverted);
+
+    /* Only allow tab DnD in Wayland.  We are using a hack in list-base to
+     * get the preferred action which we can not replicate here because we
+     * don't have access to the GtkDropTarget to check the actions on the GdkDrag.
+     * See: https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/4982
+     */
+#ifdef GDK_WINDOWING_WAYLAND
+    if (GDK_IS_WAYLAND_DISPLAY (gtk_widget_get_display (GTK_WIDGET (window))))
+    {
+        adw_tab_bar_setup_extra_drop_target (bar,
+                                             GDK_ACTION_COPY | GDK_ACTION_MOVE,
+                                             (GType [3]) {GDK_TYPE_TEXTURE, GDK_TYPE_FILE_LIST, G_TYPE_STRING}, 3);
+        adw_tab_bar_set_extra_drag_preload (bar, TRUE);
+        g_signal_connect (bar, "extra-drag-value", G_CALLBACK (extra_drag_value_cb), NULL);
+        g_signal_connect (bar, "extra-drag-drop", G_CALLBACK (extra_drag_drop_cb), NULL);
+    }
+#endif
+
+    /* While a tab is dragged, AdwTabView makes its pages untargetable, so
+     * the target sits on the view. Capture phase: run before the tab bar's
+     * own target on the view, which would only add the tab to this tile. */
+    GtkDropTarget *drop = gtk_drop_target_new (ADW_TYPE_TAB_PAGE, GDK_ACTION_MOVE);
+
+    gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (drop), GTK_PHASE_CAPTURE);
+    g_signal_connect (drop, "enter", G_CALLBACK (tile_drop_enter_cb), window);
+    g_signal_connect (drop, "motion", G_CALLBACK (tile_drop_motion_cb), window);
+    g_signal_connect (drop, "leave", G_CALLBACK (tile_drop_leave_cb), window);
+    g_signal_connect (drop, "drop", G_CALLBACK (tile_drop_cb), window);
+    gtk_widget_add_controller (GTK_WIDGET (view), GTK_EVENT_CONTROLLER (drop));
+
+    /* Focus or a click anywhere in a tile makes it the active one. */
+    GtkEventController *focus = gtk_event_controller_focus_new ();
+    GtkGesture *click = gtk_gesture_click_new ();
+
+    g_signal_connect (focus, "enter", G_CALLBACK (on_tile_focus_enter), window);
+    gtk_widget_add_controller (GTK_WIDGET (tile), focus);
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
+    gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click), GTK_PHASE_CAPTURE);
+    g_signal_connect (click, "pressed", G_CALLBACK (on_tile_pressed), window);
+    gtk_widget_add_controller (GTK_WIDGET (tile), GTK_EVENT_CONTROLLER (click));
+
+    return tile;
+}
+
+/* Opens the current folder in a new tile beside or below the active one. */
+static void
+split_active_tile (NautilusWindow   *window,
+                   NautilusTileDrop  where)
+{
+    NautilusTile *current = nautilus_tile_for_widget (GTK_WIDGET (window->tab_view));
+    GFile *location = window->active_slot != NULL
+                      ? nautilus_window_slot_get_location (window->active_slot)
+                      : NULL;
+    g_autoptr (GFile) target = NULL;
+
+    if (current == NULL)
+    {
+        return;
+    }
+
+    if (location == NULL || g_file_has_uri_scheme (location, SCHEME_SEARCH))
+    {
+        target = g_file_new_for_path (g_get_home_dir ());
+    }
+    else
+    {
+        target = g_object_ref (location);
+    }
+
+    NautilusTile *tile = create_tile (window);
+
+    nautilus_tile_layout_split (window->tile_layout, current, tile, where);
+    set_active_tile (window, tile);
+    nautilus_window_open_location_full (window, target, NAUTILUS_OPEN_FLAG_NEW_TAB, NULL);
+}
+
+static void
+action_split_right (GSimpleAction *action,
+                    GVariant      *state,
+                    gpointer       user_data)
+{
+    split_active_tile (NAUTILUS_WINDOW (user_data), NAUTILUS_TILE_DROP_RIGHT);
+}
+
+static void
+action_split_down (GSimpleAction *action,
+                   GVariant      *state,
+                   gpointer       user_data)
+{
+    split_active_tile (NAUTILUS_WINDOW (user_data), NAUTILUS_TILE_DROP_BOTTOM);
+}
+
+static void
+action_focus_next_tile (GSimpleAction *action,
+                        GVariant      *state,
+                        gpointer       user_data)
+{
+    NautilusWindow *window = NAUTILUS_WINDOW (user_data);
+    GList *tiles = nautilus_tile_layout_get_tiles (window->tile_layout);
+    GList *link = g_list_find (tiles, nautilus_tile_for_widget (GTK_WIDGET (window->tab_view)));
+    GList *next = (link != NULL && link->next != NULL) ? link->next : tiles;
+
+    if (next != NULL && next != link)
+    {
+        activate_tile (window, next->data);
+        if (window->active_slot != NULL)
+        {
+            gtk_widget_grab_focus (GTK_WIDGET (window->active_slot));
+        }
+    }
 }
 
 static GdkDragAction
@@ -1098,6 +1548,9 @@ const GActionEntry win_entries[] =
     { .name = "tab-move-new-window", .activate = action_tab_move_new_window },
     { .name = "go-to-tab", .parameter_type = "i", .state = "0", .change_state = action_go_to_tab },
     { .name = "restore-tab", .activate = action_restore_tab },
+    { .name = "split-right", .activate = action_split_right },
+    { .name = "split-down", .activate = action_split_down },
+    { .name = "focus-next-tile", .activate = action_focus_next_tile },
     { .name = "toggle-sidebar", .activate = action_toggle_sidebar },
 };
 
@@ -1128,6 +1581,9 @@ nautilus_window_initialize_actions (NautilusWindow *window)
     nautilus_application_set_accelerator (app, "win.current-location-menu", "F10");
     nautilus_application_set_accelerator (app, "win.restore-tab", "<shift><control>t");
     nautilus_application_set_accelerator (app, "win.toggle-sidebar", "F9");
+    nautilus_application_set_accelerator (app, "win.split-right", "F3");
+    nautilus_application_set_accelerator (app, "win.split-down", "<shift>F3");
+    nautilus_application_set_accelerator (app, "win.focus-next-tile", "F6");
 
     /* Alt+N for the first 9 tabs */
     for (i = 0; i < 9; ++i)
@@ -1176,11 +1632,11 @@ is_layout_reversed (void)
 static void
 notify_decoration_layout_cb (NautilusWindow *self)
 {
-    gboolean inverted = is_layout_reversed ();
+    self->tab_bar_inverted = is_layout_reversed ();
 
-    if (ADW_IS_TAB_BAR (self->tab_bar))
+    for (GList *l = nautilus_tile_layout_get_tiles (self->tile_layout); l != NULL; l = l->next)
     {
-        adw_tab_bar_set_inverted (self->tab_bar, inverted);
+        adw_tab_bar_set_inverted (nautilus_tile_get_bar (l->data), self->tab_bar_inverted);
     }
 }
 
@@ -1202,24 +1658,10 @@ nautilus_window_constructed (GObject *self)
                                  NAUTILUS_WINDOW_DEFAULT_WIDTH,
                                  NAUTILUS_WINDOW_DEFAULT_HEIGHT);
 
-    setup_tab_view (window);
+    NautilusTile *first_tile = create_tile (window);
 
-    /* Only allow tab DnD in Wayland.  We are using a hack in list-base to
-     * get the preferred action which we can not replicate here because we
-     * don't have access to the GtkDropTarget to check the actions on the GdkDrag.
-     * See: https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/4982
-     */
-#ifdef GDK_WINDOWING_WAYLAND
-    if (GDK_IS_WAYLAND_DISPLAY (gtk_widget_get_display (GTK_WIDGET (window))))
-    {
-        adw_tab_bar_setup_extra_drop_target (window->tab_bar,
-                                             GDK_ACTION_COPY | GDK_ACTION_MOVE,
-                                             (GType [3]) {GDK_TYPE_TEXTURE, GDK_TYPE_FILE_LIST, G_TYPE_STRING}, 3);
-        adw_tab_bar_set_extra_drag_preload (window->tab_bar, TRUE);
-        g_signal_connect (window->tab_bar, "extra-drag-value", G_CALLBACK (extra_drag_value_cb), NULL);
-        g_signal_connect (window->tab_bar, "extra-drag-drop", G_CALLBACK (extra_drag_drop_cb), NULL);
-    }
-#endif
+    nautilus_tile_layout_set_root (window->tile_layout, first_tile);
+    set_active_tile (window, first_tile);
 
     settings = gtk_settings_get_default ();
     g_signal_connect_object (settings, "notify::gtk-decoration-layout",
@@ -1357,6 +1799,8 @@ set_active_slot (NautilusWindow     *window,
     /* make new slot active, if it exists */
     if (new_slot)
     {
+        set_active_tile (window, nautilus_tile_for_widget (GTK_WIDGET (new_slot)));
+
         AdwTabPage *page = adw_tab_view_get_page (window->tab_view,
                                                   GTK_WIDGET (new_slot));
         adw_tab_view_set_selected_page (window->tab_view, page);
@@ -1574,6 +2018,7 @@ nautilus_window_init (NautilusWindow *window)
 
     g_type_ensure (NAUTILUS_TYPE_NETWORK_ADDRESS_BAR);
     g_type_ensure (NAUTILUS_TYPE_TOOLBAR);
+    g_type_ensure (NAUTILUS_TYPE_TILE_LAYOUT);
     g_type_ensure (NAUTILUS_TYPE_PLACES_SIDEBAR);
     g_type_ensure (NAUTILUS_TYPE_PROGRESS_INDICATOR);
     g_type_ensure (NAUTILUS_TYPE_SHORTCUT_MANAGER);
@@ -1700,8 +2145,8 @@ nautilus_window_class_init (NautilusWindowClass *class)
     gtk_widget_class_bind_template_child (wclass, NautilusWindow, split_view);
     gtk_widget_class_bind_template_child (wclass, NautilusWindow, places_sidebar);
     gtk_widget_class_bind_template_child (wclass, NautilusWindow, toast_overlay);
-    gtk_widget_class_bind_template_child (wclass, NautilusWindow, tab_view);
-    gtk_widget_class_bind_template_child (wclass, NautilusWindow, tab_bar);
+    gtk_widget_class_bind_template_child (wclass, NautilusWindow, tile_layout);
+    gtk_widget_class_bind_template_child (wclass, NautilusWindow, tab_menu_model);
     gtk_widget_class_bind_template_child (wclass, NautilusWindow, network_address_bar);
 
     signals[LOCATIONS_CHANGED] =

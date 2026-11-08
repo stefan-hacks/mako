@@ -240,6 +240,8 @@ libnautilus_sources = [
   'nautilus-tag-manager.h',
   'nautilus-thumbnails.c',
   'nautilus-thumbnails.h',
+  'nautilus-tile-layout.c',
+  'nautilus-tile-layout.h',
   'nautilus-toolbar.c',
   'nautilus-toolbar.h',
   'nautilus-toolbar-menu-sections.h',

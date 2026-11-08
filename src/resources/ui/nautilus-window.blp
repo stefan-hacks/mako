@@ -70,6 +70,18 @@ menu tab_menu_model {
 
   section {
     item {
+      label: _("Split _Right");
+      action: "win.split-right";
+    }
+
+    item {
+      label: _("Split _Down");
+      action: "win.split-down";
+    }
+  }
+
+  section {
+    item {
       label: _("Move Tab to New _Window");
       action: "win.tab-move-new-window";
     }
@@ -166,14 +178,7 @@ template $NautilusWindow: Adw.ApplicationWindow {
             window-slot: bind template.active-slot;
           }
 
-          [top]
-          Adw.TabBar tab_bar {
-            view: tab_view;
-          }
-
-          content: Adw.TabView tab_view {
-            menu-model: tab_menu_model;
-          };
+          content: $NautilusTileLayout tile_layout {};
 
           [bottom]
           $NautilusNetworkAddressBar network_address_bar {

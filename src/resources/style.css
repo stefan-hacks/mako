@@ -389,3 +389,23 @@ rubberband {
 .toolbar.no-bottom-padding {
   padding-bottom: 0px;
 }
+
+/* Tiles: a thin accent line marks the active one when the window is split */
+nautilus-tile-layout.split nautilus-tile {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: outline-color 150ms;
+}
+
+nautilus-tile-layout.split nautilus-tile.active-tile {
+  outline-color: color-mix(in srgb, var(--accent-color) 55%, transparent);
+}
+
+/* Tiles: the tab strip blends into the view, so only the selected tab
+ * stands out as a tile */
+nautilus-tile > tabbar .box,
+nautilus-tile > tabbar .box:backdrop {
+  background-color: var(--view-bg-color);
+  color: var(--view-fg-color);
+  box-shadow: none;
+}
