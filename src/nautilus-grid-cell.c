@@ -677,8 +677,13 @@ nautilus_grid_cell_init (NautilusGridCell *self)
                              G_CALLBACK (on_alt_held_changed), self, G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_labels_get (), "tags-changed",
                              G_CALLBACK (gtk_widget_queue_draw), self, G_CONNECT_SWAPPED);
-    g_signal_connect_object (nautilus_flier_settings (), "changed",
-                             G_CALLBACK (gtk_widget_queue_draw), self, G_CONNECT_SWAPPED);
+    for (guint i = 0; i < 3; i++)
+    {
+        static const char *keys[] = { "changed::marks-on-tiles", "changed::ratings", "changed::tags" };
+
+        g_signal_connect_object (nautilus_flier_settings (), keys[i],
+                                 G_CALLBACK (gtk_widget_queue_draw), self, G_CONNECT_SWAPPED);
+    }
 
     /* Connect automatically to an item. */
     self->item_signal_group = g_signal_group_new (NAUTILUS_TYPE_VIEW_ITEM);

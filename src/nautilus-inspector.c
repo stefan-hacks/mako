@@ -626,7 +626,9 @@ nautilus_inspector_init (NautilusInspector *self)
 
     g_signal_connect (self, "map", G_CALLBACK (on_map), NULL);
     g_signal_connect (self, "unmap", G_CALLBACK (on_unmap), NULL);
-    g_signal_connect_object (nautilus_flier_settings (), "changed",
+    g_signal_connect_object (nautilus_flier_settings (), "changed::ratings",
+                             G_CALLBACK (schedule_update), self, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::tags",
                              G_CALLBACK (schedule_update), self, G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_labels_get (), "tags-changed",
                              G_CALLBACK (schedule_update), self, G_CONNECT_SWAPPED);
