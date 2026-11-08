@@ -497,6 +497,61 @@ switch_row_new (const char *title,
     return row;
 }
 
+/* A switch per sidebar group: on unless the group is in sidebar-hidden-groups. */
+static void
+sync_group_switch (GtkWidget *row)
+{
+    g_auto (GStrv) hidden = g_settings_get_strv (nautilus_flier_settings (), "sidebar-hidden-groups");
+    const char *id = g_object_get_data (G_OBJECT (row), "group-id");
+
+    adw_switch_row_set_active (ADW_SWITCH_ROW (row), !g_strv_contains ((const char * const *) hidden, id));
+}
+
+static void
+on_group_switch (GtkWidget *row)
+{
+    g_auto (GStrv) hidden = g_settings_get_strv (nautilus_flier_settings (), "sidebar-hidden-groups");
+    g_autoptr (GStrvBuilder) builder = g_strv_builder_new ();
+    const char *id = g_object_get_data (G_OBJECT (row), "group-id");
+    gboolean show = adw_switch_row_get_active (ADW_SWITCH_ROW (row));
+
+    for (guint i = 0; hidden[i] != NULL; i++)
+    {
+        if (!g_str_equal (hidden[i], id))
+        {
+            g_strv_builder_add (builder, hidden[i]);
+        }
+    }
+    if (!show)
+    {
+        g_strv_builder_add (builder, id);
+    }
+
+    g_auto (GStrv) result = g_strv_builder_end (builder);
+
+    if (!g_strv_equal ((const char * const *) result, (const char * const *) hidden))
+    {
+        g_settings_set_strv (nautilus_flier_settings (), "sidebar-hidden-groups", (const char * const *) result);
+    }
+}
+
+static GtkWidget *
+group_switch_new (const char *title,
+                  const char *id)
+{
+    GtkWidget *row = adw_switch_row_new ();
+
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
+    adw_preferences_row_set_use_underline (ADW_PREFERENCES_ROW (row), TRUE);
+    g_object_set_data (G_OBJECT (row), "group-id", (gpointer) id);
+    sync_group_switch (row);
+    g_signal_connect (row, "notify::active", G_CALLBACK (on_group_switch), NULL);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-hidden-groups",
+                             G_CALLBACK (sync_group_switch), row, G_CONNECT_SWAPPED);
+
+    return row;
+}
+
 static void
 on_manage_tags (AdwActionRow *row)
 {
@@ -600,6 +655,19 @@ nautilus_labels_preferences_page_new (void)
                                switch_row_new (_("Sidebar _Groups"),
                                                _("Bookmarks, Places, Storage, Recent and Tags as groups that fold away"),
                                                "sidebar-groups"));
+    adw_preferences_page_add (ADW_PREFERENCES_PAGE (page), ADW_PREFERENCES_GROUP (group));
+
+    /* Which sidebar groups there are */
+    group = adw_preferences_group_new ();
+    adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (group), _("Sidebar Sections"));
+    adw_preferences_group_set_description (ADW_PREFERENCES_GROUP (group),
+                                           _("Drag a section's header in the sidebar to move it."));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), group_switch_new (_("_Bookmarks"), "bookmarks"));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), group_switch_new (_("_Places"), "places"));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), group_switch_new (_("_Storage"), "devices"));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), group_switch_new (_("_Cloud"), "cloud"));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), group_switch_new (_("_Recent Folders"), "recent"));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), group_switch_new (_("_Tags"), "tags"));
     adw_preferences_page_add (ADW_PREFERENCES_PAGE (page), ADW_PREFERENCES_GROUP (group));
 
     /* Quick Look */

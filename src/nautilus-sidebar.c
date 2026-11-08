@@ -556,17 +556,36 @@ toggle_group (NautilusSidebarSectionType section)
 }
 
 static gboolean
+group_hidden (NautilusSidebarSectionType section)
+{
+    g_auto (GStrv) hidden = g_settings_get_strv (nautilus_flier_settings (), "sidebar-hidden-groups");
+    const char *id = group_id (section);
+
+    return id != NULL && g_strv_contains ((const char * const *) hidden, id);
+}
+
+static gboolean
 list_box_filter_func (GtkListBoxRow *row,
                       gpointer       user_data)
 {
     NautilusSidebarSectionType section;
     NautilusSidebarRowType place_type;
 
-    if (!NAUTILUS_IS_SIDEBAR_ROW (row) || !groups_on ())
+    if (!NAUTILUS_IS_SIDEBAR_ROW (row))
     {
         return TRUE;
     }
     g_object_get (row, "section-type", &section, "place-type", &place_type, NULL);
+
+    /* Switched off in Preferences: not shown at all. */
+    if (group_hidden (section))
+    {
+        return FALSE;
+    }
+    if (!groups_on ())
+    {
+        return TRUE;
+    }
 
     return place_type == NAUTILUS_SIDEBAR_ROW_GROUP_HEADER || !group_collapsed (section);
 }
@@ -742,6 +761,7 @@ show_group_menu (GtkWidget *header,
 static void
 on_order_changed (NautilusSidebar *sidebar)
 {
+    gtk_list_box_invalidate_filter (GTK_LIST_BOX (sidebar->list_box));
     gtk_list_box_invalidate_sort (GTK_LIST_BOX (sidebar->list_box));
     gtk_list_box_invalidate_headers (GTK_LIST_BOX (sidebar->list_box));
 }
@@ -4290,6 +4310,8 @@ nautilus_sidebar_init (NautilusSidebar *sidebar)
                                   list_box_filter_func, sidebar, NULL);
     g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-collapsed",
                              G_CALLBACK (on_collapsed_changed), sidebar, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-hidden-groups",
+                             G_CALLBACK (on_order_changed), sidebar, G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-group-order",
                              G_CALLBACK (on_order_changed), sidebar, G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-groups",

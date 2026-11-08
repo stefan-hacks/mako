@@ -2440,14 +2440,45 @@ setup_inspector (NautilusWindow *window)
                       G_CALLBACK (on_active_slot_for_inspector), NULL);
 }
 
-/* Holding Alt shows the stars of every tile under the pointer. */
+/* Holding Alt (alone) shows the stars of the tile under the pointer. Key
+ * presses and releases, not "modifiers": that reports the state from before
+ * the key, so it would show them on release and hide them on press. */
 static gboolean
-on_modifiers_changed (GtkEventControllerKey *controller,
-                      GdkModifierType        state)
+is_alt (guint keyval)
 {
-    nautilus_labels_set_alt_held ((state & GDK_ALT_MASK) != 0 &&
-                                  (state & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_SUPER_MASK)) == 0);
-    return FALSE;
+    return keyval == GDK_KEY_Alt_L || keyval == GDK_KEY_Alt_R || keyval == GDK_KEY_ISO_Level3_Shift;
+}
+
+static gboolean
+on_alt_pressed (GtkEventControllerKey *controller,
+                guint                  keyval,
+                guint                  keycode,
+                GdkModifierType        state,
+                gpointer               user_data)
+{
+    if (is_alt (keyval))
+    {
+        nautilus_labels_set_alt_held ((state & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_SUPER_MASK)) == 0);
+    }
+    else
+    {
+        /* Alt plus another key is a shortcut, not looking at stars. */
+        nautilus_labels_set_alt_held (FALSE);
+    }
+    return GDK_EVENT_PROPAGATE;
+}
+
+static void
+on_alt_released (GtkEventControllerKey *controller,
+                 guint                  keyval,
+                 guint                  keycode,
+                 GdkModifierType        state,
+                 gpointer               user_data)
+{
+    if (is_alt (keyval))
+    {
+        nautilus_labels_set_alt_held (FALSE);
+    }
 }
 
 static void
@@ -2517,8 +2548,10 @@ nautilus_window_init (NautilusWindow *window)
     controller = gtk_event_controller_key_new ();
     gtk_widget_add_controller (GTK_WIDGET (window), controller);
     gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_CAPTURE);
-    g_signal_connect (controller, "modifiers",
-                      G_CALLBACK (on_modifiers_changed), NULL);
+    g_signal_connect (controller, "key-pressed",
+                      G_CALLBACK (on_alt_pressed), NULL);
+    g_signal_connect (controller, "key-released",
+                      G_CALLBACK (on_alt_released), NULL);
     g_signal_connect (window, "notify::is-active",
                       G_CALLBACK (on_window_active_changed), NULL);
 

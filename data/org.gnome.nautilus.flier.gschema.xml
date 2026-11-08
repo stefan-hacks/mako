@@ -88,6 +88,11 @@
       <summary>Order of the sidebar groups</summary>
       <description>Drag a group's header onto another, or use Move Up and Move Down in its menu.</description>
     </key>
+    <key type="as" name="sidebar-hidden-groups">
+      <default>[]</default>
+      <summary>Hidden sidebar groups</summary>
+      <description>Sidebar groups not shown at all: bookmarks, places, cloud, devices, recent, tags.</description>
+    </key>
     <key type="as" name="sidebar-collapsed">
       <default>['recent']</default>
       <summary>Folded sidebar groups</summary>
