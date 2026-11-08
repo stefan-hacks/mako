@@ -18,4 +18,8 @@ void nautilus_shortcuts_attach         (GtkWindow *window);
 /* The overview: search commands and keys, run a command, change its keys. */
 void nautilus_shortcuts_dialog_present (GtkWindow *window);
 
+/* The key to show next to @detailed_action in menus ("<alt>1"), the
+ * left-hand one if it has one, or NULL. */
+char *nautilus_shortcuts_get_accel     (const char *detailed_action);
+
 G_END_DECLS

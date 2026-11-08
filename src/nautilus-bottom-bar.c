@@ -12,6 +12,7 @@
 #define G_LOG_DOMAIN "nautilus-bottom-bar"
 
 #include "nautilus-bottom-bar.h"
+#include "nautilus-shortcuts.h"
 
 #include <adwaita.h>
 #include <glib/gi18n.h>
@@ -232,6 +233,8 @@ sync_mode (NautilusBottomBar *self)
     gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (self->views_button), mode_icons[mode - 1]);
 }
 
+static void append_item (GMenu *menu, const char *label, const char *action);
+
 /* The view's own sort and group items, which change with the view. */
 static void
 sync_sort_menu (NautilusBottomBar *self)
@@ -239,6 +242,7 @@ sync_sort_menu (NautilusBottomBar *self)
     NautilusToolbarMenuSections *sections = self->slot != NULL ?
                                             nautilus_window_slot_get_toolbar_menu_sections (self->slot) : NULL;
     g_autoptr (GMenu) hidden = g_menu_new ();
+    g_autoptr (GMenu) groups = g_menu_new ();
 
     g_menu_remove_all (self->sort_menu);
     gtk_widget_set_sensitive (self->sort_button, sections != NULL);
@@ -248,7 +252,11 @@ sync_sort_menu (NautilusBottomBar *self)
     }
 
     g_menu_append_section (self->sort_menu, _("Sort"), sections->sort_section);
-    g_menu_append (hidden, _("Show _Hidden Files"), "view.show-hidden-files");
+    append_item (groups, _("_Next Grouping"), "view.group-by-next");
+    append_item (groups, _("No _Groups"), "view.group-by('none')");
+    g_menu_append_section (self->sort_menu, _("Group"), G_MENU_MODEL (groups));
+    append_item (hidden, _("Show _Hidden Files"), "view.show-hidden-files");
+    append_item (hidden, _("Fla_t View"), "win.flat-view");
     g_menu_append_section (self->sort_menu, NULL, G_MENU_MODEL (hidden));
 }
 
@@ -351,11 +359,32 @@ icon_toggle (const char *icon_name,
     return button;
 }
 
+static gboolean
+keys_in_menus (void)
+{
+    return g_settings_get_boolean (nautilus_flier_settings (), "menu-shortcuts");
+}
+
+/* An item, with its shortcut next to it while "menu-shortcuts" is on. */
+static void
+append_item (GMenu      *menu,
+             const char *label,
+             const char *action)
+{
+    g_autoptr (GMenuItem) item = g_menu_item_new (label, action);
+    g_autofree char *accel = keys_in_menus () ? nautilus_shortcuts_get_accel (action) : NULL;
+
+    if (accel != NULL)
+    {
+        g_menu_item_set_attribute (item, "accel", "s", accel);
+    }
+    g_menu_append_item (menu, item);
+}
+
 /* The views of the tab, then what goes with them. */
 static GtkWidget *
-build_views_button (void)
+build_views_popover (void)
 {
-    GtkWidget *button = gtk_menu_button_new ();
     g_autoptr (GMenu) menu = g_menu_new ();
     g_autoptr (GMenu) views = g_menu_new ();
     g_autoptr (GMenu) zoom = g_menu_new ();
@@ -365,10 +394,10 @@ build_views_button (void)
     GtkWidget *popover;
     GtkWidget *zoom_button;
 
-    g_menu_append (views, _("_List"), "win.view-mode(uint32 1)");
-    g_menu_append (views, _("_Tree"), "win.view-mode(uint32 2)");
-    g_menu_append (views, _("_Columns"), "win.view-mode(uint32 3)");
-    g_menu_append (views, _("_Grid"), "win.view-mode(uint32 4)");
+    append_item (views, _("_List"), "win.view-mode(uint32 1)");
+    append_item (views, _("_Tree"), "win.view-mode(uint32 2)");
+    append_item (views, _("_Columns"), "win.view-mode(uint32 3)");
+    append_item (views, _("_Grid"), "win.view-mode(uint32 4)");
     g_menu_append_section (menu, NULL, G_MENU_MODEL (views));
 
     item = g_menu_item_new (NULL, NULL);
@@ -384,13 +413,13 @@ build_views_button (void)
     g_menu_append_item (menu, item);
     g_clear_object (&item);
 
-    g_menu_append (more, _("_Flat View"), "win.flat-view");
+    append_item (more, _("_Flat View"), "win.flat-view");
     g_menu_append (more, _("_Visible Columns…"), "view.visible-columns");
     g_menu_append (more, _("Captions…"), "view.visible-captions");
     g_menu_append_section (menu, NULL, G_MENU_MODEL (more));
 
-    g_menu_append (panels, _("_Inspector"), "win.inspector-visible");
-    g_menu_append (panels, _("_Bottom Bar"), "win.bottom-bar");
+    append_item (panels, _("_Inspector"), "win.inspector-visible");
+    append_item (panels, _("_Bottom Bar"), "win.bottom-bar");
     g_menu_append_section (menu, NULL, G_MENU_MODEL (panels));
 
     popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
@@ -405,11 +434,28 @@ build_views_button (void)
     gtk_widget_add_css_class (zoom_button, "flat");
     gtk_popover_menu_add_child (GTK_POPOVER_MENU (popover), zoom_button, "zoom-in");
 
-    gtk_menu_button_set_popover (GTK_MENU_BUTTON (button), popover);
+    return popover;
+}
+
+static GtkWidget *
+build_views_button (void)
+{
+    GtkWidget *button = gtk_menu_button_new ();
+
+    gtk_menu_button_set_popover (GTK_MENU_BUTTON (button), build_views_popover ());
     gtk_widget_set_tooltip_text (button, _("View (Alt+1 to 4)"));
     gtk_widget_set_valign (button, GTK_ALIGN_CENTER);
 
     return button;
+}
+
+static void sync_sort_menu (NautilusBottomBar *self);
+
+static void
+on_menu_shortcuts (NautilusBottomBar *self)
+{
+    gtk_menu_button_set_popover (GTK_MENU_BUTTON (self->views_button), build_views_popover ());
+    sync_sort_menu (self);
 }
 
 static void
@@ -468,6 +514,10 @@ nautilus_bottom_bar_init (NautilusBottomBar *self)
 
     self->filter = gtk_custom_filter_new (matches, self, NULL);
 
+    g_signal_connect_object (nautilus_flier_settings (), "changed::menu-shortcuts",
+                             G_CALLBACK (on_menu_shortcuts), self, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::custom-shortcuts",
+                             G_CALLBACK (on_menu_shortcuts), self, G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_flier_settings (), "changed::bottom-bar",
                              G_CALLBACK (on_setting), self, G_CONNECT_SWAPPED);
     gtk_widget_set_visible (GTK_WIDGET (self), nautilus_bottom_bar_enabled ());

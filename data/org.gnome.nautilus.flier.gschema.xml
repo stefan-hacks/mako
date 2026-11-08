@@ -88,6 +88,11 @@
       <summary>Folded sidebar groups</summary>
       <description>The sidebar groups that are folded away.</description>
     </key>
+    <key type="b" name="menu-shortcuts">
+      <default>true</default>
+      <summary>Shortcuts in menus</summary>
+      <description>Show the keys next to the items of the bottom bar's menus, to learn them.</description>
+    </key>
     <key type="b" name="shortcut-hints">
       <default>true</default>
       <summary>Shortcut hints</summary>

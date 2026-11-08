@@ -1516,6 +1516,71 @@ focus_tile_step (NautilusWindow *window,
     }
 }
 
+/* Ctrl+Tab: through every tab of every tile, in order, wrapping round. */
+static void
+tab_step_all (NautilusWindow *window,
+              gboolean        forward)
+{
+    GList *tiles = nautilus_tile_layout_get_tiles (window->tile_layout);
+    GList *link = g_list_find (tiles, nautilus_tile_for_widget (GTK_WIDGET (window->tab_view)));
+    AdwTabPage *page = adw_tab_view_get_selected_page (window->tab_view);
+    int n = adw_tab_view_get_n_pages (window->tab_view);
+    int pos = page != NULL ? adw_tab_view_get_page_position (window->tab_view, page) : 0;
+    GList *to;
+    AdwTabView *view;
+
+    if (forward ? pos + 1 < n : pos > 0)
+    {
+        adw_tab_view_set_selected_page (window->tab_view,
+                                        adw_tab_view_get_nth_page (window->tab_view, pos + (forward ? 1 : -1)));
+        return;
+    }
+
+    if (forward)
+    {
+        to = (link != NULL && link->next != NULL) ? link->next : tiles;
+    }
+    else
+    {
+        to = (link != NULL && link->prev != NULL) ? link->prev : g_list_last (tiles);
+    }
+    if (to == NULL)
+    {
+        return;
+    }
+
+    view = nautilus_tile_get_view (to->data);
+    n = adw_tab_view_get_n_pages (view);
+    if (n > 0)
+    {
+        adw_tab_view_set_selected_page (view, adw_tab_view_get_nth_page (view, forward ? 0 : n - 1));
+    }
+    if (to != link)
+    {
+        activate_tile (window, to->data);
+    }
+    if (window->active_slot != NULL)
+    {
+        gtk_widget_grab_focus (GTK_WIDGET (window->active_slot));
+    }
+}
+
+static void
+action_tab_next_all (GSimpleAction *action,
+                     GVariant      *state,
+                     gpointer       user_data)
+{
+    tab_step_all (NAUTILUS_WINDOW (user_data), TRUE);
+}
+
+static void
+action_tab_previous_all (GSimpleAction *action,
+                         GVariant      *state,
+                         gpointer       user_data)
+{
+    tab_step_all (NAUTILUS_WINDOW (user_data), FALSE);
+}
+
 static void
 action_focus_next_tile (GSimpleAction *action,
                         GVariant      *state,
@@ -1593,6 +1658,8 @@ const GActionEntry win_entries[] =
     { .name = "split-right", .activate = action_split_right },
     { .name = "split-down", .activate = action_split_down },
     { .name = "focus-next-tile", .activate = action_focus_next_tile },
+    { .name = "tab-next-all", .activate = action_tab_next_all },
+    { .name = "tab-previous-all", .activate = action_tab_previous_all },
     { .name = "focus-previous-tile", .activate = action_focus_previous_tile },
     { .name = "toggle-sidebar", .activate = action_toggle_sidebar },
 };

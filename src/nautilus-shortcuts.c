@@ -66,6 +66,8 @@ static const Command commands[] =
     { SECTION_TABS, N_("Move Tab Right"), "win.tab-move-right", "<ctrl><shift>Page_Down", NULL },
     { SECTION_TABS, N_("Split Right"), "win.split-right", "F3", NULL },
     { SECTION_TABS, N_("Split Down"), "win.split-down", "<shift>F3", NULL },
+    { SECTION_TABS, N_("Next Tab"), "win.tab-next-all", NULL, "<ctrl>Tab|<ctrl>Page_Down" },
+    { SECTION_TABS, N_("Previous Tab"), "win.tab-previous-all", NULL, "<ctrl><shift>Tab|<ctrl>Page_Up|<ctrl>ISO_Left_Tab" },
     { SECTION_TABS, N_("Next Tile"), "win.focus-next-tile", "F6", "<alt>t|<ctrl>grave" },
     { SECTION_TABS, N_("Previous Tile"), "win.focus-previous-tile", "<shift>F6", "<alt><shift>t|<ctrl>asciitilde" },
     { SECTION_TABS, N_("New Window"), "app.clone-window", "<ctrl>n", NULL },
@@ -152,7 +154,8 @@ static const struct
     { N_("Quick Look: rate, clear"), "1–5  `" },
     { N_("Quick Look: zoom in, out, fit, real size"), "W  S  Q  Z" },
     { N_("Quick Look: previous, next"), "A  D" },
-    { N_("Quick Look: play, back, ahead, frame, mute"), "K  J  L  E F  M" },
+    { N_("Quick Look: play, back, ahead, mute"), "K  J  L  M" },
+    { N_("Quick Look: frame back, ahead"), "Shift+A  Shift+D  ,  ." },
     { N_("Quick Look: names, marks, fullscreen"), "N  T  Tab" },
 };
 
@@ -245,6 +248,50 @@ accel_label (const char *accel)
     }
 
     return gtk_accelerator_get_label (key, mods);
+}
+
+static gboolean
+same_action (const char *a,
+             const char *b)
+{
+    g_autofree char *name_a = NULL, *name_b = NULL;
+    g_autoptr (GVariant) target_a = NULL, target_b = NULL;
+
+    if (!g_action_parse_detailed_name (a, &name_a, &target_a, NULL) ||
+        !g_action_parse_detailed_name (b, &name_b, &target_b, NULL))
+    {
+        return FALSE;
+    }
+
+    return g_str_equal (name_a, name_b) &&
+           ((target_a == NULL && target_b == NULL) ||
+            (target_a != NULL && target_b != NULL && g_variant_equal (target_a, target_b)));
+}
+
+char *
+nautilus_shortcuts_get_accel (const char *detailed_action)
+{
+    for (guint i = 0; i < G_N_ELEMENTS (commands); i++)
+    {
+        const Command *command = &commands[i];
+        gboolean changed;
+
+        if (!same_action (command->action, detailed_action))
+        {
+            continue;
+        }
+
+        g_auto (GStrv) keys = command_keys (command, &changed);
+        g_auto (GStrv) extras = split_keys (command->extras);
+
+        if (!changed && extras[0] != NULL)
+        {
+            return g_strdup (extras[0]);
+        }
+        return g_strdup (keys[0]);
+    }
+
+    return NULL;
 }
 
 /* --------------------------------------------------------- Running */

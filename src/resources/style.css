@@ -410,6 +410,19 @@ nautilus-tile > tabbar .box:backdrop {
   box-shadow: none;
 }
 
+/* The selected tab in the accent color; strongest in the active tile. */
+tabbar tab:selected {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 22%, transparent);
+  box-shadow: inset 0 -2px var(--accent-bg-color);
+}
+tabbar tab:selected:backdrop {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 14%, transparent);
+}
+nautilus-tile-layout.split nautilus-tile:not(.active-tile) tabbar tab:selected {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 10%, transparent);
+  box-shadow: inset 0 -2px color-mix(in srgb, var(--accent-bg-color) 45%, transparent);
+}
+
 /* Quick Look */
 .quick-look .star.rated { color: #f5c211; }
 .quick-look .star { min-width: 24px; padding-left: 2px; padding-right: 2px; }

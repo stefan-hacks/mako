@@ -429,6 +429,139 @@ create_view_ui (NautilusListView *self)
     return GTK_COLUMN_VIEW (widget);
 }
 
+/* ------------------------------------------- The column headers' menu */
+
+/* A right click on the column headers: which columns to show. Folders with
+ * columns of their own keep them; otherwise the default changes. */
+static void
+toggle_column (NautilusListView *self,
+               const char       *name,
+               gboolean          show)
+{
+    NautilusFile *file = nautilus_list_base_get_directory_as_file (NAUTILUS_LIST_BASE (self));
+    g_auto (GStrv) own = nautilus_file_get_metadata_list (file, NAUTILUS_METADATA_KEY_LIST_VIEW_VISIBLE_COLUMNS);
+    g_auto (GStrv) visible = nautilus_column_get_visible_columns (file);
+    g_auto (GStrv) order = nautilus_column_get_column_order (file);
+    g_autoptr (GStrvBuilder) builder = g_strv_builder_new ();
+    g_autolist (NautilusColumn) all = nautilus_get_columns_for_file (file);
+
+    all = nautilus_sort_columns (all, order);
+    for (GList *l = all; l != NULL; l = l->next)
+    {
+        g_autofree char *column = NULL;
+        gboolean on;
+
+        g_object_get (l->data, "name", &column, NULL);
+        on = g_strcmp0 (column, name) == 0 ? show : g_strv_contains ((const char * const *) visible, column);
+        if (on)
+        {
+            g_strv_builder_add (builder, column);
+        }
+    }
+
+    g_auto (GStrv) result = g_strv_builder_end (builder);
+
+    if (own != NULL && own[0] != NULL)
+    {
+        nautilus_file_set_metadata_list (file, NAUTILUS_METADATA_KEY_LIST_VIEW_VISIBLE_COLUMNS, result);
+        update_columns_settings_from_metadata_and_preferences (self);
+    }
+    else
+    {
+        g_settings_set_strv (nautilus_list_view_preferences,
+                             NAUTILUS_PREFERENCES_LIST_VIEW_DEFAULT_VISIBLE_COLUMNS,
+                             (const char * const *) result);
+    }
+}
+
+static void
+on_column_toggled (GSimpleAction *action,
+                   GVariant      *value,
+                   gpointer       user_data)
+{
+    g_simple_action_set_state (action, value);
+    toggle_column (NAUTILUS_LIST_VIEW (user_data), g_action_get_name (G_ACTION (action)),
+                   g_variant_get_boolean (value));
+}
+
+static gboolean
+unparent_later (gpointer popover)
+{
+    gtk_widget_unparent (popover);
+    g_object_unref (popover);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+on_header_menu_closed (GtkWidget *popover)
+{
+    g_idle_add (unparent_later, g_object_ref (popover));
+}
+
+static void
+on_header_pressed (GtkGestureClick  *gesture,
+                   int               n_press,
+                   double            x,
+                   double            y,
+                   NautilusListView *self)
+{
+    GtkWidget *view = GTK_WIDGET (self->view_ui);
+    GtkWidget *header = gtk_widget_get_first_child (view);
+    GtkWidget *columns = gtk_widget_get_ancestor (GTK_WIDGET (self), NAUTILUS_TYPE_COLUMNS);
+    NautilusFile *file = nautilus_list_base_get_directory_as_file (NAUTILUS_LIST_BASE (self));
+    graphene_rect_t bounds;
+
+    if (header == NULL || !gtk_widget_compute_bounds (header, view, &bounds) ||
+        y > bounds.origin.y + bounds.size.height || file == NULL ||
+        (columns != NULL && nautilus_columns_get_names_only (NAUTILUS_COLUMNS (columns))))
+    {
+        return;
+    }
+
+    gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+
+    g_autoptr (GSimpleActionGroup) group = g_simple_action_group_new ();
+    g_autoptr (GMenu) menu = g_menu_new ();
+    g_autoptr (GMenu) items = g_menu_new ();
+    g_auto (GStrv) visible = nautilus_column_get_visible_columns (file);
+    g_auto (GStrv) order = nautilus_column_get_column_order (file);
+    g_autolist (NautilusColumn) all = nautilus_sort_columns (nautilus_get_columns_for_file (file), order);
+
+    for (GList *l = all; l != NULL; l = l->next)
+    {
+        g_autofree char *name = NULL;
+        g_autofree char *label = NULL;
+        g_autofree char *detailed = NULL;
+        g_autoptr (GSimpleAction) action = NULL;
+
+        g_object_get (l->data, "name", &name, "label", &label, NULL);
+        if (g_strcmp0 (name, "name") == 0 || !g_action_name_is_valid (name))
+        {
+            continue;
+        }
+        action = g_simple_action_new_stateful (name, NULL, g_variant_new_boolean (
+                                                   g_strv_contains ((const char * const *) visible, name)));
+        g_signal_connect (action, "change-state", G_CALLBACK (on_column_toggled), self);
+        g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (action));
+        detailed = g_strconcat ("column-header.", name, NULL);
+        g_menu_append (items, label, detailed);
+    }
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (items));
+    g_menu_append (menu, _("_Visible Columns…"), "view.visible-columns");
+
+    gtk_widget_insert_action_group (view, "column-header", G_ACTION_GROUP (group));
+
+    GtkWidget *popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
+
+    gtk_widget_set_parent (popover, view);
+    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+    gtk_widget_set_halign (popover, GTK_ALIGN_START);
+    gtk_popover_set_pointing_to (GTK_POPOVER (popover), &(GdkRectangle) { (int) x, (int) y, 1, 1 });
+    /* Later: the menu's action runs after it closes. */
+    g_signal_connect (popover, "closed", G_CALLBACK (on_header_menu_closed), NULL);
+    gtk_popover_popup (GTK_POPOVER (popover));
+}
+
 static GtkWidget *
 create_column_editor (NautilusListView *view)
 {
@@ -1270,6 +1403,14 @@ nautilus_list_view_init (NautilusListView *self)
                              G_CONNECT_SWAPPED);
 
     self->view_ui = create_view_ui (self);
+
+    GtkGesture *header_click = gtk_gesture_click_new ();
+
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (header_click), GDK_BUTTON_SECONDARY);
+    gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (header_click), GTK_PHASE_CAPTURE);
+    g_signal_connect (header_click, "pressed", G_CALLBACK (on_header_pressed), self);
+    gtk_widget_add_controller (GTK_WIDGET (self->view_ui), GTK_EVENT_CONTROLLER (header_click));
+
     nautilus_list_base_setup_gestures (NAUTILUS_LIST_BASE (self));
 
     setup_view_columns (self);
