@@ -66,6 +66,7 @@
 #include "nautilus-tile-layout.h"
 #include "nautilus-signaller.h"
 #include "nautilus-toolbar.h"
+#include "nautilus-files-view.h"
 #include "nautilus-inspector.h"
 #include "nautilus-columns.h"
 #include "nautilus-labels.h"
@@ -1660,6 +1661,125 @@ extra_drag_drop_cb (AdwTabBar    *self,
     return nautilus_dnd_perform_drop (view, value, action, target_location);
 }
 
+/* ------------------------------------------------------------ Capture */
+
+/* For the README's pictures: with FLIER_CAPTURE set, win.flier-capture(s)
+ * takes "shot:FILE.png", "rec:DIR" / "stop" (frames at 15 per second),
+ * "act:ACTION" (run on the files view, so view., slot. and win. all work),
+ * "select:NAME,NAME" and "size:W,H". Nothing of this exists otherwise. */
+
+static guint capture_timer;
+static char *capture_dir;
+static guint capture_frame;
+
+static void
+capture_to_png (NautilusWindow *window,
+                const char     *path)
+{
+    GtkWidget *widget = GTK_WIDGET (window);
+    g_autoptr (GdkPaintable) paintable = gtk_widget_paintable_new (widget);
+    g_autoptr (GtkSnapshot) snapshot = gtk_snapshot_new ();
+    g_autoptr (GskRenderNode) node = NULL;
+    g_autoptr (GdkTexture) texture = NULL;
+    int width = gtk_widget_get_width (widget), height = gtk_widget_get_height (widget);
+    double scale = gdk_surface_get_scale (gtk_native_get_surface (GTK_NATIVE (window)));
+
+    gtk_snapshot_scale (snapshot, scale, scale);
+    gdk_paintable_snapshot (paintable, snapshot, width, height);
+    node = gtk_snapshot_to_node (snapshot);
+    if (node == NULL)
+    {
+        return;
+    }
+    texture = gsk_renderer_render_texture (gtk_native_get_renderer (GTK_NATIVE (window)), node,
+                                           &GRAPHENE_RECT_INIT (0, 0, width * scale, height * scale));
+    gdk_texture_save_to_png (texture, path);
+}
+
+static gboolean
+capture_tick (gpointer data)
+{
+    g_autofree char *path = g_strdup_printf ("%s/%05u.png", capture_dir, capture_frame++);
+
+    capture_to_png (data, path);
+    return G_SOURCE_CONTINUE;
+}
+
+static void
+action_flier_capture (GSimpleAction *action,
+                      GVariant      *parameter,
+                      gpointer       user_data)
+{
+    NautilusWindow *window = user_data;
+    const char *command = g_variant_get_string (parameter, NULL);
+    NautilusFilesView *view = window->active_slot != NULL
+                              ? nautilus_window_slot_get_current_view (window->active_slot) : NULL;
+
+    if (g_str_has_prefix (command, "shot:"))
+    {
+        capture_to_png (window, command + 5);
+    }
+    else if (g_str_has_prefix (command, "rec:"))
+    {
+        g_free (capture_dir);
+        capture_dir = g_strdup (command + 4);
+        capture_frame = 0;
+        g_clear_handle_id (&capture_timer, g_source_remove);
+        capture_timer = g_timeout_add (1000 / 15, capture_tick, window);
+    }
+    else if (g_str_equal (command, "stop"))
+    {
+        g_clear_handle_id (&capture_timer, g_source_remove);
+    }
+    else if ((g_str_has_prefix (command, "act:") || g_str_has_prefix (command, "key:")) && view != NULL)
+    {
+        g_autofree char *name = NULL;
+        g_autoptr (GVariant) target = NULL;
+
+        /* "key:" is "act:" with the hint its key would show. */
+        if (command[0] == 'k')
+        {
+            nautilus_shortcuts_show_hint_for (GTK_WINDOW (window), command + 4);
+        }
+
+        if (g_action_parse_detailed_name (command + 4, &name, &target, NULL))
+        {
+            gtk_widget_activate_action_variant (GTK_WIDGET (view), name, target);
+        }
+    }
+    else if (g_str_has_prefix (command, "select:") && view != NULL)
+    {
+        g_auto (GStrv) names = g_strsplit (command + 7, ",", -1);
+        GFile *location = nautilus_window_slot_get_location (window->active_slot);
+        GList *files = NULL;
+
+        for (guint i = 0; names[i] != NULL; i++)
+        {
+            g_autoptr (GFile) child = g_file_get_child (location, names[i]);
+
+            files = g_list_append (files, nautilus_file_get (child));
+        }
+        nautilus_files_view_set_selection (view, files, TRUE);
+        nautilus_file_list_free (files);
+    }
+    else if (g_str_has_prefix (command, "go:") && window->active_slot != NULL)
+    {
+        g_autoptr (GFile) location = g_file_new_for_path (command + 3);
+
+        nautilus_window_slot_open_location_full (window->active_slot, location, NULL);
+    }
+    else if (g_str_has_prefix (command, "size:"))
+    {
+        int w = 0, h = 0;
+
+        if (sscanf (command + 5, "%d,%d", &w, &h) == 2)
+        {
+            gtk_window_unmaximize (GTK_WINDOW (window));
+            gtk_window_set_default_size (GTK_WINDOW (window), w, h);
+        }
+    }
+}
+
 const GActionEntry win_entries[] =
 {
     { .name = "current-location-menu", .activate = action_show_current_location_menu },
@@ -1697,6 +1817,28 @@ nautilus_window_initialize_actions (NautilusWindow *window)
     g_action_map_add_action_entries (G_ACTION_MAP (window),
                                      win_entries, G_N_ELEMENTS (win_entries),
                                      window);
+
+    if (g_getenv ("FLIER_CAPTURE") != NULL)
+    {
+        const GActionEntry capture_entry[] =
+        {
+            { .name = "flier-capture", .activate = action_flier_capture, .parameter_type = "s" },
+        };
+
+        g_action_map_add_action_entries (G_ACTION_MAP (window), capture_entry, 1, window);
+        if (g_getenv ("FLIER_CAPTURE_PRESET") != NULL)
+        {
+            /* The look of the README pictures (run with GSETTINGS_BACKEND=memory). */
+            GSettings *flier = nautilus_flier_settings ();
+            const char *collapsed[] = { "recent", NULL };
+            const char *hidden[] = { "devices", "cloud", NULL };
+
+            g_settings_set_boolean (flier, "file-flier-imported", TRUE);
+            g_settings_set_boolean (flier, "sidebar-groups", TRUE);
+            g_settings_set_strv (flier, "sidebar-collapsed", collapsed);
+            g_settings_set_strv (flier, "sidebar-hidden-groups", hidden);
+        }
+    }
 
 #define ACCELS(...) ((const char *[]) { __VA_ARGS__, NULL })
 

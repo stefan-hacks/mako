@@ -502,8 +502,10 @@ nautilus_bottom_bar_init (NautilusBottomBar *self)
     gtk_widget_set_hexpand (linked, TRUE);
     gtk_widget_set_valign (linked, GTK_ALIGN_CENTER);
     gtk_box_append (GTK_BOX (linked), self->stack);
-    gtk_box_append (GTK_BOX (linked), self->sort_button);
     gtk_box_append (GTK_BOX (self->box), linked);
+    /* A plain icon like the buttons after it, not a pill joined to the entry. */
+    gtk_widget_add_css_class (self->sort_button, "flat");
+    gtk_box_append (GTK_BOX (self->box), self->sort_button);
 
     self->flat_button = icon_toggle ("view-paged-symbolic", _("Flat View: All Files in Subfolders"));
     g_object_set_data (G_OBJECT (self->flat_button), "flier-tooltip-action", (gpointer) "win.flat-view");

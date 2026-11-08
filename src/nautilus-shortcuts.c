@@ -93,7 +93,7 @@ static const Command commands[] =
     { SECTION_EDIT, N_("Move to Trash"), "view.move-to-trash", "Delete", "<alt>x" },
     { SECTION_EDIT, N_("Delete Permanently"), "view.delete-permanently-shortcut", "<shift>Delete", "<alt><shift>x" },
     { SECTION_EDIT, N_("Create Link"), "view.create-link", "<ctrl>m", NULL },
-    { SECTION_EDIT, N_("Properties"), "view.properties", "<ctrl>i|<alt>Return", "<alt>e" },
+    { SECTION_EDIT, N_("Properties"), "view.properties", "<ctrl>i|<alt>Return", "<alt>g" },
 
     { SECTION_SELECT, N_("Select All"), "view.select-all", "<ctrl>a", NULL },
     { SECTION_SELECT, N_("Invert Selection"), "view.invert-selection", "<ctrl><shift>i", "<ctrl><shift>a" },
@@ -113,8 +113,8 @@ static const Command commands[] =
     { SECTION_VIEW, N_("Zoom Out"), "view.zoom-out", "<ctrl>minus", "<ctrl><alt>s" },
     { SECTION_VIEW, N_("Reset Zoom"), "view.zoom-standard", "<ctrl>0", NULL },
     { SECTION_VIEW, N_("Show Hidden Files"), "view.show-hidden-files", "<ctrl>h", "<alt>v" },
-    { SECTION_VIEW, N_("Show Inspector"), "win.inspector-visible", NULL, "F4" },
-    { SECTION_VIEW, N_("Move Inspector Clockwise"), "win.inspector-side-next", NULL, "<shift>F4" },
+    { SECTION_VIEW, N_("Show Inspector"), "win.inspector-visible", NULL, "<alt>e|F4" },
+    { SECTION_VIEW, N_("Move Inspector Clockwise"), "win.inspector-side-next", NULL, "<alt><shift>e|<shift>F4" },
     { SECTION_VIEW, N_("Move Inspector Counterclockwise"), "win.inspector-side-previous", NULL, "<ctrl><shift>F4" },
     { SECTION_VIEW, N_("Inspector on the Right"), "win.inspector-side('right')", NULL, NULL },
     { SECTION_VIEW, N_("Inspector at the Bottom"), "win.inspector-side('bottom')", NULL, NULL },
@@ -296,6 +296,24 @@ nautilus_shortcuts_get_accel (const char *detailed_action)
     }
 
     return NULL;
+}
+
+static void show_hint (GtkWindow *window, const Command *command, const char *accel);
+
+void
+nautilus_shortcuts_show_hint_for (GtkWindow  *window,
+                                  const char *detailed_action)
+{
+    for (guint i = 0; i < G_N_ELEMENTS (commands); i++)
+    {
+        if (same_action (commands[i].action, detailed_action))
+        {
+            g_autofree char *accel = nautilus_shortcuts_get_accel (detailed_action);
+
+            show_hint (window, &commands[i], accel);
+            return;
+        }
+    }
 }
 
 /* --------------------------------------------------------- Tooltips */

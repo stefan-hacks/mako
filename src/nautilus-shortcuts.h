@@ -27,4 +27,8 @@ char *nautilus_shortcuts_get_accel     (const char *detailed_action);
  * widget without an action can name one in its "flier-tooltip-action" data. */
 void  nautilus_shortcuts_add_tooltips  (GtkWidget  *root);
 
+/* Shows the hint for @detailed_action as if its key was pressed. */
+void  nautilus_shortcuts_show_hint_for (GtkWindow  *window,
+                                        const char *detailed_action);
+
 G_END_DECLS
