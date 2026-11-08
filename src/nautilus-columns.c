@@ -53,6 +53,7 @@ struct _NautilusColumns
 
     /* Columns mode, per tab. New tabs start the way the last one was set. */
     gboolean enabled;
+    gboolean tree;
     guint mode;
     gboolean flat;
     double wheel_amount;
@@ -457,7 +458,18 @@ compute_mode (NautilusColumns *self)
         return NAUTILUS_COLUMNS_MODE_GRID;
     }
 
-    return self->enabled ? NAUTILUS_COLUMNS_MODE_COLUMNS : NAUTILUS_COLUMNS_MODE_LIST;
+    if (self->enabled)
+    {
+        return NAUTILUS_COLUMNS_MODE_COLUMNS;
+    }
+
+    return self->tree ? NAUTILUS_COLUMNS_MODE_TREE : NAUTILUS_COLUMNS_MODE_LIST;
+}
+
+gboolean
+nautilus_columns_get_tree (NautilusColumns *self)
+{
+    return self->tree && !self->enabled;
 }
 
 static void
@@ -466,10 +478,11 @@ on_view_changed (NautilusColumns *self)
     NautilusFilesView *view = files_view (self);
     guint mode;
 
-    /* Columns go with the list: back from the grid is the plain list. */
+    /* Columns and tree go with the list: back from the grid is the plain list. */
     if (view != NULL && nautilus_files_view_get_view_id (view) == NAUTILUS_VIEW_GRID_ID)
     {
         self->enabled = FALSE;
+        self->tree = FALSE;
     }
 
     mode = compute_mode (self);
@@ -502,17 +515,32 @@ nautilus_columns_set_mode (NautilusColumns *self,
         return;
     }
 
+    gboolean was_tree = nautilus_columns_get_tree (self);
+    GSettings *flier = nautilus_flier_settings ();
+
     self->enabled = mode == NAUTILUS_COLUMNS_MODE_COLUMNS;
-    if (g_settings_get_boolean (nautilus_flier_settings (), "columns-view") != self->enabled)
+    self->tree = mode == NAUTILUS_COLUMNS_MODE_TREE;
+    /* New tabs start this way. */
+    if (g_settings_get_boolean (flier, "columns-view") != self->enabled)
     {
-        g_settings_set_boolean (nautilus_flier_settings (), "columns-view", self->enabled);
+        g_settings_set_boolean (flier, "columns-view", self->enabled);
+    }
+    if (g_settings_get_boolean (flier, "tree-view") != self->tree)
+    {
+        g_settings_set_boolean (flier, "tree-view", self->tree);
     }
 
     g_clear_object (&self->shown_location);
     if (nautilus_files_view_get_view_id (view) != view_id)
     {
-        /* Notifies the icon name, which lands in on_view_changed (). */
+        /* Notifies the icon name, which lands in on_view_changed (). The new
+         * list view asks for the tree as it sets up. */
         gtk_widget_activate_action (GTK_WIDGET (self->slot), "slot.files-view-mode", "u", view_id);
+    }
+    else if (was_tree != nautilus_columns_get_tree (self))
+    {
+        /* The list view takes the tree on when it loads the folder. */
+        gtk_widget_activate_action (GTK_WIDGET (self->slot), "slot.reload", NULL);
     }
     on_view_changed (self);
 }
@@ -662,7 +690,7 @@ on_wheel (GtkEventControllerScroll *controller,
     self->wheel_amount += dy;
     if (ABS (self->wheel_amount) >= threshold)
     {
-        /* Wheel up: the next view, as in Alt+1, 2, 3. */
+        /* Wheel up: the next view, as in Alt+1 to 4. */
         nautilus_columns_step (self, self->wheel_amount < 0 ? 1 : -1);
         self->wheel_amount = 0;
         /* One step per notch, also for smoothed and fast wheels. */
@@ -794,7 +822,9 @@ nautilus_columns_init (NautilusColumns *self)
     gtk_widget_add_controller (GTK_WIDGET (self), controller);
 
     self->enabled = g_settings_get_boolean (nautilus_flier_settings (), "columns-view");
-    self->mode = self->enabled ? NAUTILUS_COLUMNS_MODE_COLUMNS : NAUTILUS_COLUMNS_MODE_LIST;
+    self->tree = !self->enabled && g_settings_get_boolean (nautilus_flier_settings (), "tree-view");
+    self->mode = self->enabled ? NAUTILUS_COLUMNS_MODE_COLUMNS :
+                 self->tree ? NAUTILUS_COLUMNS_MODE_TREE : NAUTILUS_COLUMNS_MODE_LIST;
 }
 
 static void

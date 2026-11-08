@@ -11,6 +11,7 @@
 /* Needed for NautilusColumn. */
 #include <nautilus-extension.h>
 
+#include "nautilus-columns.h"
 #include "nautilus-list-base-private.h"
 #include "nautilus-list-view.h"
 
@@ -653,8 +654,13 @@ nautilus_list_view_setup_directory (NautilusListBase  *list_base,
 
     update_columns_settings_from_metadata_and_preferences (self);
 
-    self->expand_as_a_tree = g_settings_get_boolean (nautilus_list_view_preferences,
-                                                     NAUTILUS_PREFERENCES_LIST_VIEW_USE_TREE);
+    /* Each tab's own Tree mode, if it's in one. */
+    GtkWidget *columns = gtk_widget_get_ancestor (GTK_WIDGET (self), NAUTILUS_TYPE_COLUMNS);
+
+    self->expand_as_a_tree = columns != NULL
+                             ? nautilus_columns_get_tree (NAUTILUS_COLUMNS (columns))
+                             : g_settings_get_boolean (nautilus_list_view_preferences,
+                                                       NAUTILUS_PREFERENCES_LIST_VIEW_USE_TREE);
 
     self->path_attribute_q = 0;
     g_clear_object (&self->file_path_base_location);

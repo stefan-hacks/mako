@@ -68,6 +68,11 @@
       <summary>Show the inspector</summary>
       <description>Show a panel with a preview and the details of the selected item.</description>
     </key>
+    <key type="b" name="tree-view">
+      <default>false</default>
+      <summary>Tree view for new tabs</summary>
+      <description>Whether new tabs show the list with expandable folders. The last choice of View is remembered.</description>
+    </key>
     <key type="b" name="bottom-bar">
       <default>true</default>
       <summary>Bottom bar</summary>

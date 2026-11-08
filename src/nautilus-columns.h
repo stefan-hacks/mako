@@ -21,12 +21,13 @@ G_DECLARE_FINAL_TYPE (NautilusColumns, nautilus_columns, NAUTILUS, COLUMNS, GtkW
 typedef enum
 {
     NAUTILUS_COLUMNS_MODE_LIST = 1,
+    NAUTILUS_COLUMNS_MODE_TREE,
     NAUTILUS_COLUMNS_MODE_COLUMNS,
     NAUTILUS_COLUMNS_MODE_GRID,
 } NautilusColumnsMode;
 
 GtkWidget *nautilus_columns_new         (NautilusWindowSlot *slot);
-/* The "mode" property: list, columns or grid, the order of Alt+1, 2, 3. */
+/* The "mode" property: list, tree, columns or grid, the order of Alt+1 to 4. */
 guint      nautilus_columns_get_mode    (NautilusColumns    *self);
 void       nautilus_columns_set_mode    (NautilusColumns    *self,
                                          guint               mode);
@@ -41,5 +42,9 @@ void       nautilus_columns_set_content (NautilusColumns    *self,
 gboolean   nautilus_columns_get_flat    (NautilusColumns    *self);
 void       nautilus_columns_set_flat    (NautilusColumns    *self,
                                          gboolean            flat);
+
+/* Whether the list shows folders as a tree (Tree mode). The list view asks
+ * when it sets up a folder. */
+gboolean   nautilus_columns_get_tree    (NautilusColumns    *self);
 
 G_END_DECLS

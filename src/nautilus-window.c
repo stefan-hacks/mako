@@ -1629,8 +1629,8 @@ nautilus_window_initialize_actions (NautilusWindow *window)
     nautilus_application_set_accelerator (app, "win.focus-next-tile", "F6");
     nautilus_application_set_accelerator (app, "win.focus-previous-tile", "<shift>F6");
 
-    /* Alt+N for tabs 4 to 9; Alt+1, 2, 3 switch views. */
-    for (i = 3; i < 9; ++i)
+    /* Alt+N for tabs 5 to 9; Alt+1 to 4 switch views. */
+    for (i = 4; i < 9; ++i)
     {
         g_snprintf (detailed_action, sizeof (detailed_action), "win.go-to-tab(%i)", i);
         g_snprintf (accel, sizeof (accel), "<alt>%i", i + 1);

@@ -220,7 +220,7 @@ nautilus_bottom_bar_handle_event (NautilusBottomBar     *self,
 
 static const char *const mode_icons[] =
 {
-    "view-list-symbolic", "view-columns-symbolic", "view-grid-symbolic",
+    "view-list-symbolic", "view-list-bullet-symbolic", "view-columns-symbolic", "view-grid-symbolic",
 };
 
 /* The views button shows the tab's view. */
@@ -359,8 +359,9 @@ build_views_button (void)
     GtkWidget *zoom_button;
 
     g_menu_append (views, _("_List"), "win.view-mode(uint32 1)");
-    g_menu_append (views, _("_Columns"), "win.view-mode(uint32 2)");
-    g_menu_append (views, _("_Grid"), "win.view-mode(uint32 3)");
+    g_menu_append (views, _("_Tree"), "win.view-mode(uint32 2)");
+    g_menu_append (views, _("_Columns"), "win.view-mode(uint32 3)");
+    g_menu_append (views, _("_Grid"), "win.view-mode(uint32 4)");
     g_menu_append_section (menu, NULL, G_MENU_MODEL (views));
 
     item = g_menu_item_new (NULL, NULL);
@@ -394,7 +395,7 @@ build_views_button (void)
     gtk_popover_menu_add_child (GTK_POPOVER_MENU (popover), zoom_button, "zoom-in");
 
     gtk_menu_button_set_popover (GTK_MENU_BUTTON (button), popover);
-    gtk_widget_set_tooltip_text (button, _("View (Alt+1, 2, 3)"));
+    gtk_widget_set_tooltip_text (button, _("View (Alt+1 to 4)"));
     gtk_widget_set_valign (button, GTK_ALIGN_CENTER);
 
     return button;

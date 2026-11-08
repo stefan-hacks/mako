@@ -94,8 +94,9 @@ static const Command commands[] =
     { SECTION_SELECT, N_("Select Items Matching"), "view.select-pattern", "<ctrl>s", NULL },
 
     { SECTION_VIEW, N_("List View"), "win.view-mode(uint32 1)", "<ctrl>1", "<alt>1" },
-    { SECTION_VIEW, N_("Columns View"), "win.view-mode(uint32 2)", NULL, "<alt>2" },
-    { SECTION_VIEW, N_("Grid View"), "win.view-mode(uint32 3)", "<ctrl>2", "<alt>3" },
+    { SECTION_VIEW, N_("Tree View"), "win.view-mode(uint32 2)", NULL, "<alt>2" },
+    { SECTION_VIEW, N_("Columns View"), "win.view-mode(uint32 3)", NULL, "<alt>3" },
+    { SECTION_VIEW, N_("Grid View"), "win.view-mode(uint32 4)", "<ctrl>2", "<alt>4" },
     { SECTION_VIEW, N_("Flat View"), "win.flat-view", NULL, "<alt>r" },
     { SECTION_VIEW, N_("Show Bottom Bar"), "win.bottom-bar", NULL, "<alt><shift>b" },
     { SECTION_VIEW, N_("Next View"), "win.view-step(1)", NULL, NULL },
