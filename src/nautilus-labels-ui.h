@@ -22,6 +22,9 @@ void       nautilus_rating_row_set_rating   (GtkWidget  *row,
 /* A row of color swatches for a context menu: none, the eight colors of the
  * current scheme, and the rainbow. Activates "view.folder-color". */
 GtkWidget *nautilus_folder_color_row_new    (void);
+/* The same for any action taking the slot ("i"), with or without the rainbow. */
+GtkWidget *nautilus_color_row_new           (const char *action,
+                                             gboolean    rainbow);
 
 /* Tick tags for @files, make new ones, recolor or delete them. */
 void       nautilus_tags_dialog_present     (GList      *files,

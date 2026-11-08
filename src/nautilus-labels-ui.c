@@ -110,8 +110,9 @@ static void
 on_swatch_clicked (GtkButton *button,
                    gpointer   user_data)
 {
-    gtk_widget_activate_action (GTK_WIDGET (button), "view.folder-color", "i",
-                                GPOINTER_TO_INT (user_data));
+    const char *action = g_object_get_data (G_OBJECT (button), "color-action");
+
+    gtk_widget_activate_action (GTK_WIDGET (button), action, "i", GPOINTER_TO_INT (user_data));
     close_menu (GTK_WIDGET (button));
 }
 
@@ -171,7 +172,8 @@ draw_swatch (GtkDrawingArea *area,
 
 static GtkWidget *
 swatch_new (int         slot,
-            const char *tooltip)
+            const char *tooltip,
+            const char *action)
 {
     GtkWidget *button = gtk_button_new ();
     GtkWidget *area = gtk_drawing_area_new ();
@@ -184,26 +186,38 @@ swatch_new (int         slot,
     gtk_widget_add_css_class (button, "circular");
     gtk_widget_add_css_class (button, "swatch");
     gtk_widget_set_tooltip_text (button, tooltip);
+    g_object_set_data (G_OBJECT (button), "color-action", (gpointer) action);
     g_signal_connect (button, "clicked", G_CALLBACK (on_swatch_clicked), GINT_TO_POINTER (slot));
 
     return button;
 }
 
 GtkWidget *
-nautilus_folder_color_row_new (void)
+nautilus_color_row_new (const char *action,
+                        gboolean    rainbow)
 {
     GtkWidget *row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
 
     gtk_widget_add_css_class (row, "nautilus-folder-color-row");
-    gtk_box_append (GTK_BOX (row), swatch_new (-1, _("No Color")));
+    gtk_box_append (GTK_BOX (row), swatch_new (-1, _("No Color"), action));
     for (int i = 0; i < NAUTILUS_FOLDER_COLOR_SLOTS; i++)
     {
-        gtk_box_append (GTK_BOX (row), swatch_new (i, nautilus_labels_get_slot_name (i)));
+        gtk_box_append (GTK_BOX (row), swatch_new (i, nautilus_labels_get_slot_name (i), action));
     }
-    gtk_box_append (GTK_BOX (row), swatch_new (NAUTILUS_FOLDER_COLOR_RAINBOW,
-                                               _("Rainbow: each selected folder gets the next color")));
+    if (rainbow)
+    {
+        gtk_box_append (GTK_BOX (row), swatch_new (NAUTILUS_FOLDER_COLOR_RAINBOW,
+                                                   _("Rainbow: each selected folder gets the next color"),
+                                                   action));
+    }
 
     return row;
+}
+
+GtkWidget *
+nautilus_folder_color_row_new (void)
+{
+    return nautilus_color_row_new ("view.folder-color", TRUE);
 }
 
 /* ------------------------------------------------------------ Tag dot */

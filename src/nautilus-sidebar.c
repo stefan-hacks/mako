@@ -33,6 +33,7 @@
 #include "nautilus-file-utilities.h"
 #include "nautilus-global-preferences.h"
 #include "nautilus-labels.h"
+#include "nautilus-labels-ui.h"
 #include "nautilus-properties.h"
 #include "nautilus-scheme.h"
 #include "nautilus-sidebar-row.h"
@@ -109,6 +110,7 @@ struct _NautilusSidebar
     GtkWidget *list_box;
     GtkWidget *new_bookmark_row;
     GtkWidget *stepped_row;     /* weak: where Ctrl+Up/Down last went */
+    GtkWidget *color_row;       /* weak: the row a color menu is for */
 
     NautilusBookmarkList *bookmark_list;
 
@@ -785,6 +787,202 @@ unparent_popover_later (GtkWidget *popover)
     g_idle_add (unparent_later, g_object_ref (popover));
 }
 
+/* ------------------------------------------------------- Row colors */
+
+/* Any row can have its icon colored from its right-click menu: a slot of
+ * the folder color scheme, kept in sidebar-colors by row key. A tag row
+ * recolors the tag itself. */
+
+static char *
+row_color_key (GtkWidget *row)
+{
+    NautilusSidebarRowType place_type;
+    NautilusSidebarSectionType section;
+    g_autofree char *uri = NULL;
+    g_autofree char *label = NULL;
+
+    g_object_get (row, "place-type", &place_type, "section-type", &section,
+                  "uri", &uri, "label", &label, NULL);
+    if (place_type == NAUTILUS_SIDEBAR_ROW_GROUP_HEADER)
+    {
+        return g_strconcat ("group:", group_id (section), NULL);
+    }
+    if (uri != NULL)
+    {
+        return g_steal_pointer (&uri);
+    }
+    return label != NULL ? g_strconcat ("name:", label, NULL) : NULL;
+}
+
+static int
+row_color_slot (GVariant  *colors,
+                GtkWidget *row)
+{
+    g_autofree char *key = row_color_key (row);
+    int slot;
+
+    if (key == NULL || !g_variant_lookup (colors, key, "i", &slot))
+    {
+        return -1;
+    }
+    return slot;
+}
+
+/* One rule per slot in the current scheme, and the slot's class on each row. */
+static void
+update_row_colors (NautilusSidebar *sidebar)
+{
+    static GtkCssProvider *provider = NULL;
+    g_autoptr (GVariant) colors = g_settings_get_value (nautilus_flier_settings (), "sidebar-colors");
+    g_autoptr (GString) css = g_string_new (NULL);
+
+    if (provider == NULL)
+    {
+        provider = gtk_css_provider_new ();
+        gtk_style_context_add_provider_for_display (gdk_display_get_default (), GTK_STYLE_PROVIDER (provider),
+                                                    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+    for (int i = 0; i < NAUTILUS_FOLDER_COLOR_SLOTS; i++)
+    {
+        GdkRGBA rgba;
+        g_autofree char *color = NULL;
+
+        nautilus_labels_get_slot_color (i, &rgba);
+        color = gdk_rgba_to_string (&rgba);
+        g_string_append_printf (css, ".navigation-sidebar row.sidebar-color-%d box > image:first-child "
+                                     "{ color: %s; opacity: 1; }\n", i, color);
+    }
+    gtk_css_provider_load_from_string (provider, css->str);
+
+    for (GtkWidget *child = gtk_widget_get_first_child (sidebar->list_box); child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        NautilusSidebarRowType place_type;
+        int slot;
+
+        if (!NAUTILUS_IS_SIDEBAR_ROW (child))
+        {
+            continue;
+        }
+        g_object_get (child, "place-type", &place_type, NULL);
+        slot = place_type == NAUTILUS_SIDEBAR_ROW_TAG ? -1 : row_color_slot (colors, child);
+        for (int i = 0; i < NAUTILUS_FOLDER_COLOR_SLOTS; i++)
+        {
+            g_autofree char *class = g_strdup_printf ("sidebar-color-%d", i);
+
+            if (i == slot)
+            {
+                gtk_widget_add_css_class (child, class);
+            }
+            else
+            {
+                gtk_widget_remove_css_class (child, class);
+            }
+        }
+    }
+}
+
+static void
+on_row_color (GSimpleAction *action,
+              GVariant      *parameter,
+              gpointer       user_data)
+{
+    NautilusSidebar *sidebar = user_data;
+    GtkWidget *row = sidebar->color_row;
+    int slot = g_variant_get_int32 (parameter);
+    NautilusSidebarRowType place_type;
+
+    if (row == NULL)
+    {
+        return;
+    }
+    g_object_get (row, "place-type", &place_type, NULL);
+
+    if (place_type == NAUTILUS_SIDEBAR_ROW_TAG)
+    {
+        g_autofree char *label = NULL;
+        GdkRGBA rgba = { 0.6, 0.6, 0.6, 1 };
+
+        g_object_get (row, "label", &label, NULL);
+        if (slot >= 0)
+        {
+            nautilus_labels_get_slot_color (slot, &rgba);
+        }
+        nautilus_labels_set_tag_color (label, &rgba);
+        return;
+    }
+
+    g_autofree char *key = row_color_key (row);
+    g_autoptr (GVariant) colors = g_settings_get_value (nautilus_flier_settings (), "sidebar-colors");
+    GVariantBuilder builder;
+    GVariantIter iter;
+    const char *k;
+    int v;
+
+    if (key == NULL)
+    {
+        return;
+    }
+    g_variant_builder_init (&builder, G_VARIANT_TYPE ("a{si}"));
+    g_variant_iter_init (&iter, colors);
+    while (g_variant_iter_next (&iter, "{&si}", &k, &v))
+    {
+        if (!g_str_equal (k, key))
+        {
+            g_variant_builder_add (&builder, "{si}", k, v);
+        }
+    }
+    if (slot >= 0)
+    {
+        g_variant_builder_add (&builder, "{si}", key, slot);
+    }
+    g_settings_set_value (nautilus_flier_settings (), "sidebar-colors", g_variant_builder_end (&builder));
+}
+
+/* Adds the swatches to a menu made from @menu; call before and after. */
+static void
+append_color_section (GMenu *menu)
+{
+    g_autoptr (GMenu) section = g_menu_new ();
+    g_autoptr (GMenuItem) item = g_menu_item_new (NULL, NULL);
+
+    g_menu_item_set_attribute (item, "custom", "s", "sidebar-color");
+    g_menu_append_item (section, item);
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (section));
+}
+
+static void
+add_color_swatches (GtkWidget *popover,
+                    GtkWidget *row)
+{
+    NautilusSidebar *sidebar = NAUTILUS_PLACES_SIDEBAR (gtk_widget_get_ancestor (row, NAUTILUS_TYPE_PLACES_SIDEBAR));
+
+    if (sidebar != NULL)
+    {
+        g_set_weak_pointer (&sidebar->color_row, row);
+    }
+    gtk_popover_menu_add_child (GTK_POPOVER_MENU (popover),
+                                nautilus_color_row_new ("row-color.set", FALSE), "sidebar-color");
+}
+
+static void
+show_tag_menu (GtkWidget *row,
+               double     x,
+               double     y)
+{
+    g_autoptr (GMenu) menu = g_menu_new ();
+    GtkWidget *popover;
+
+    append_color_section (menu);
+    popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
+    add_color_swatches (popover, row);
+    gtk_widget_set_parent (popover, row);
+    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+    gtk_popover_set_pointing_to (GTK_POPOVER (popover), &(GdkRectangle) { (int) x, (int) y, 1, 1 });
+    g_signal_connect (popover, "closed", G_CALLBACK (unparent_popover_later), NULL);
+    gtk_popover_popup (GTK_POPOVER (popover));
+}
+
 static void
 show_group_menu (GtkWidget *header,
                  double     x,
@@ -803,8 +1001,10 @@ show_group_menu (GtkWidget *header,
     gtk_widget_insert_action_group (header, "group", G_ACTION_GROUP (group));
     g_menu_append (menu, _("Move _Up"), "group.up");
     g_menu_append (menu, _("Move _Down"), "group.down");
+    append_color_section (menu);
 
     popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
+    add_color_swatches (popover, header);
     gtk_widget_set_parent (popover, header);
     gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
     gtk_popover_set_pointing_to (GTK_POPOVER (popover), &(GdkRectangle) { (int) x, (int) y, 1, 1 });
@@ -1817,6 +2017,7 @@ update_places (NautilusSidebar *sidebar)
     nautilus_sidebar_row_hide (NAUTILUS_SIDEBAR_ROW (sidebar->new_bookmark_row), TRUE);
 
     add_flier_rows (sidebar);
+    update_row_colors (sidebar);
 
     /* restore original selection */
     if (original_uri)
@@ -4017,9 +4218,11 @@ create_row_popover (NautilusSidebar    *sidebar,
         g_object_unref (section);
     }
 
+    append_color_section (menu);
     sidebar->popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
     g_object_unref (menu);
     gtk_widget_set_parent (sidebar->popover, GTK_WIDGET (sidebar));
+    add_color_swatches (sidebar->popover, GTK_WIDGET (row));
     gtk_widget_set_halign (sidebar->popover, GTK_ALIGN_START);
     gtk_popover_set_has_arrow (GTK_POPOVER (sidebar->popover), FALSE);
     g_signal_connect (sidebar->popover, "destroy", G_CALLBACK (on_row_popover_destroy), sidebar);
@@ -4163,7 +4366,11 @@ on_row_released (GtkGestureClick    *gesture,
             {
                 show_group_menu (GTK_WIDGET (row), x, y);
             }
-            else if (place_type != NAUTILUS_SIDEBAR_ROW_TAG)
+            else if (place_type == NAUTILUS_SIDEBAR_ROW_TAG)
+            {
+                show_tag_menu (GTK_WIDGET (row), x, y);
+            }
+            else
             {
                 show_row_popover (NAUTILUS_SIDEBAR_ROW (row), x, y);
             }
@@ -4623,6 +4830,21 @@ nautilus_sidebar_init (NautilusSidebar *sidebar)
                                      entries, G_N_ELEMENTS (entries),
                                      sidebar);
     gtk_widget_insert_action_group (GTK_WIDGET (sidebar), "row", sidebar->row_actions);
+    {
+        static const GActionEntry color_entries[] =
+        {
+            { .name = "set", .activate = on_row_color, .parameter_type = "i" },
+        };
+        g_autoptr (GSimpleActionGroup) colors = g_simple_action_group_new ();
+
+        g_action_map_add_action_entries (G_ACTION_MAP (colors), color_entries,
+                                         G_N_ELEMENTS (color_entries), sidebar);
+        gtk_widget_insert_action_group (GTK_WIDGET (sidebar), "row-color", G_ACTION_GROUP (colors));
+    }
+    g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-colors",
+                             G_CALLBACK (update_row_colors), sidebar, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_labels_get (), "colors-changed",
+                             G_CALLBACK (update_row_colors), sidebar, G_CONNECT_SWAPPED);
 
     gtk_accessible_update_property (GTK_ACCESSIBLE (sidebar),
                                     GTK_ACCESSIBLE_PROPERTY_LABEL, _("Sidebar"),
@@ -4710,6 +4932,7 @@ nautilus_sidebar_dispose (GObject *object)
 
     sidebar = NAUTILUS_PLACES_SIDEBAR (object);
     g_clear_weak_pointer (&sidebar->stepped_row);
+    g_clear_weak_pointer (&sidebar->color_row);
 
     g_clear_object (&sidebar->window_slot);
     g_clear_object (&sidebar->slot_signal_group);

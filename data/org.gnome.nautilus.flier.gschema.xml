@@ -88,6 +88,11 @@
       <summary>Order of the sidebar groups</summary>
       <description>Drag a group's header onto another, or use Move Up and Move Down in its menu.</description>
     </key>
+    <key type="a{si}" name="sidebar-colors">
+      <default>{}</default>
+      <summary>Sidebar colors</summary>
+      <description>Icon color slot (0-7, in the folder color scheme) of sidebar rows, by row: its uri, "group:ID" for a group header or "name:LABEL".</description>
+    </key>
     <key type="as" name="sidebar-hidden-places">
       <default>['music']</default>
       <summary>Hidden places</summary>
