@@ -1,3 +1,5 @@
+<img src="docs/media/mako.svg" width="96" align="right" alt="">
+
 # Mako
 
 **A fast, hotkey-first fork of GNOME Files (Nautilus).**

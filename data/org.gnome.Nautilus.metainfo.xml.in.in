@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>@appid@</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <name>Files</name>
+  <name>Mako</name>
   <summary>Access and organize files</summary>
   <description>
     <p>
