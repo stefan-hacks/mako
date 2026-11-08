@@ -40,4 +40,9 @@ void               nautilus_sidebar_set_show_trash             (NautilusSidebar 
 
 char *nautilus_sidebar_get_location_title (NautilusSidebar *sidebar);
 
+/* Opens the place @step rows below (or above) the current one, skipping
+ * group headers, tags and folded groups. */
+void   nautilus_sidebar_step                (NautilusSidebar *sidebar,
+                                             int              step);
+
 G_END_DECLS

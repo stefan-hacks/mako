@@ -2221,6 +2221,61 @@ open_row (NautilusSidebarRow *self,
     }
 }
 
+static gboolean
+is_steppable (GtkWidget *row)
+{
+    NautilusSidebarRowType place_type;
+    g_autofree char *uri = NULL;
+    g_autoptr (GVolume) volume = NULL;
+
+    if (!NAUTILUS_IS_SIDEBAR_ROW (row) || !gtk_widget_get_child_visible (row) ||
+        !gtk_widget_get_visible (row))
+    {
+        return FALSE;
+    }
+    g_object_get (row, "place-type", &place_type, "uri", &uri, "volume", &volume, NULL);
+
+    return place_type != NAUTILUS_SIDEBAR_ROW_GROUP_HEADER && place_type != NAUTILUS_SIDEBAR_ROW_TAG &&
+           place_type != NAUTILUS_SIDEBAR_ROW_NEW_BOOKMARK &&
+           place_type != NAUTILUS_SIDEBAR_ROW_BOOKMARK_PLACEHOLDER &&
+           (uri != NULL || volume != NULL);
+}
+
+void
+nautilus_sidebar_step (NautilusSidebar *sidebar,
+                       int              step)
+{
+    GtkListBox *list = GTK_LIST_BOX (sidebar->list_box);
+    GtkListBoxRow *current = gtk_list_box_get_selected_row (list);
+    int n = 0;
+    GtkListBoxRow *row = NULL;
+
+    while (gtk_list_box_get_row_at_index (list, n) != NULL)
+    {
+        n++;
+    }
+
+    int index = current != NULL ? gtk_list_box_row_get_index (current) : (step > 0 ? -1 : n);
+
+    /* Rows by index are in the sorted order. */
+    for (int i = index + (step > 0 ? 1 : -1); i >= 0 && i < n; i += step > 0 ? 1 : -1)
+    {
+        GtkListBoxRow *candidate = gtk_list_box_get_row_at_index (list, i);
+
+        if (is_steppable (GTK_WIDGET (candidate)))
+        {
+            row = candidate;
+            break;
+        }
+    }
+
+    if (row != NULL)
+    {
+        gtk_list_box_select_row (list, row);
+        open_row (NAUTILUS_SIDEBAR_ROW (row), 0);
+    }
+}
+
 /* Callback used for the "Open" menu items in the context menu */
 static void
 open_shortcut_cb (GSimpleAction *action,

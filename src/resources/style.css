@@ -390,17 +390,6 @@ rubberband {
   padding-bottom: 0px;
 }
 
-/* Tiles: a thin accent line marks the active one when the window is split */
-nautilus-tile-layout.split nautilus-tile {
-  outline: 2px solid transparent;
-  outline-offset: -2px;
-  transition: outline-color 150ms;
-}
-
-nautilus-tile-layout.split nautilus-tile.active-tile {
-  outline-color: color-mix(in srgb, var(--accent-color) 55%, transparent);
-}
-
 /* Tiles: the tab strip blends into the view, so only the selected tab
  * stands out as a tile */
 nautilus-tile > tabbar .box,
@@ -410,17 +399,16 @@ nautilus-tile > tabbar .box:backdrop {
   box-shadow: none;
 }
 
-/* The selected tab in the accent color; strongest in the active tile. */
+/* The tab in use: filled with the accent color. Selected tabs of the other
+ * tiles stay neutral, so the colored one is where you are. */
 tabbar tab:selected {
-  background-color: color-mix(in srgb, var(--accent-bg-color) 22%, transparent);
-  box-shadow: inset 0 -2px var(--accent-bg-color);
+  background-color: color-mix(in srgb, var(--accent-bg-color) 30%, transparent);
 }
 tabbar tab:selected:backdrop {
-  background-color: color-mix(in srgb, var(--accent-bg-color) 14%, transparent);
+  background-color: color-mix(in srgb, var(--accent-bg-color) 18%, transparent);
 }
 nautilus-tile-layout.split nautilus-tile:not(.active-tile) tabbar tab:selected {
-  background-color: color-mix(in srgb, var(--accent-bg-color) 10%, transparent);
-  box-shadow: inset 0 -2px color-mix(in srgb, var(--accent-bg-color) 45%, transparent);
+  background-color: color-mix(in srgb, currentColor 8%, transparent);
 }
 
 /* Quick Look */

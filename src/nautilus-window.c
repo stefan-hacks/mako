@@ -1566,6 +1566,16 @@ tab_step_all (NautilusWindow *window,
 }
 
 static void
+action_sidebar_step (GSimpleAction *action,
+                     GVariant      *parameter,
+                     gpointer       user_data)
+{
+    NautilusWindow *window = user_data;
+
+    nautilus_sidebar_step (window->places_sidebar, g_variant_get_int32 (parameter));
+}
+
+static void
 action_tab_next_all (GSimpleAction *action,
                      GVariant      *state,
                      gpointer       user_data)
@@ -1659,6 +1669,7 @@ const GActionEntry win_entries[] =
     { .name = "split-down", .activate = action_split_down },
     { .name = "focus-next-tile", .activate = action_focus_next_tile },
     { .name = "tab-next-all", .activate = action_tab_next_all },
+    { .name = "sidebar-step", .parameter_type = "i", .activate = action_sidebar_step },
     { .name = "tab-previous-all", .activate = action_tab_previous_all },
     { .name = "focus-previous-tile", .activate = action_focus_previous_tile },
     { .name = "toggle-sidebar", .activate = action_toggle_sidebar },
