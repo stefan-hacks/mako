@@ -30,7 +30,7 @@ https://github.com/user-attachments/assets/1a1a578e-7426-485a-a1e6-026c1ab35ce3
 - [Ratings, tags and colors](#ratings-tags-and-colors)
 - [Keyboard: one hand on the keys](#keyboard-one-hand-on-the-keys)
 - [Settings](#settings)
-- [Build and install](#build-and-install)
+- [Build and install](#build-and-install) (also [NixOS and Home Manager](#nixos-and-home-manager))
 - [Status](#status)
 - [License](#license)
 
@@ -196,6 +196,72 @@ xdg-mime default org.gnome.Nautilus.Devel.desktop inode/directory
 ```
 
 Undo it with `xdg-mime default org.gnome.Nautilus.desktop inode/directory`.
+
+To make Mako the open/save dialog for other apps (browsers, Flatpaks and
+anything else that uses the desktop portal), run
+`tools/file-chooser.sh install`. `tools/file-chooser.sh uninstall` brings
+back GNOME's dialog.
+
+### NixOS and Home Manager
+
+The repository is a flake. It is new and has not been built on NixOS yet,
+so please open an issue if something fails. Try it without installing:
+
+```sh
+nix run github:tommkotzu/mako
+```
+
+Add it to your flake inputs:
+
+```nix
+inputs.mako.url = "github:tommkotzu/mako";
+```
+
+The option is `programs.mako-files`, because `mako` is already the name of
+a notification daemon in nixpkgs and Home Manager.
+
+**NixOS** (system-wide):
+
+```nix
+{ inputs, ... }: {
+  imports = [ inputs.mako.nixosModules.default ];
+
+  programs.mako-files = {
+    enable = true;
+    defaultFileManager = true; # open folders with Mako
+    fileChooser = true;        # Mako as the open/save dialog for other apps
+    settings = {               # defaults; users can still change them
+      folder-color-scheme = "vibrant";
+      bottom-bar = true;
+    };
+  };
+}
+```
+
+**Home Manager** (per user):
+
+```nix
+{ inputs, ... }: {
+  imports = [ inputs.mako.homeManagerModules.default ];
+
+  programs.mako-files = {
+    enable = true;
+    defaultFileManager = true;
+    fileChooser = true;
+    settings = {
+      folder-color-scheme = "vibrant";
+      inspector-side = "right";
+      sidebar-hidden-places = [ "music" ];
+    };
+    bookmarks = [ "file:///home/me/Projects Projects" ]; # optional; makes the bookmarks read-only
+  };
+}
+```
+
+`settings` takes any key from
+[`data/org.gnome.nautilus.flier.gschema.xml`](data/org.gnome.nautilus.flier.gschema.xml).
+The flake also has `packages.<system>.default` (`mako-files`),
+`overlays.default` and a `devShells.default` for hacking on Mako.
 
 ## Status
 
