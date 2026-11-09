@@ -63,6 +63,20 @@ in
         data/org.gnome.nautilus.flier.gschema.xml for every key.
       '';
     };
+
+    recursiveSearch = mkOption {
+      type = types.enum [
+        "always"
+        "local-only"
+        "never"
+      ];
+      default = "always";
+      description = ''
+        Whether to search subfolders recursively. "always" searches all
+        subfolders (like ripgrep); "local-only" limits recursion to local
+        filesystems; "never" searches only the current folder.
+      '';
+    };
   };
 
   config = mkIf cfg.enable {
@@ -95,8 +109,16 @@ in
       ];
     };
 
-    programs.dconf.profiles.user.databases = mkIf (cfg.settings != { }) [
-      { settings."org/gnome/nautilus/flier" = cfg.settings; }
-    ];
+    programs.dconf.profiles.user.databases =
+      lib.optionals (cfg.settings != { }) [
+        { settings."org/gnome/nautilus/flier" = cfg.settings; }
+      ]
+      ++ [
+        {
+          settings."org/gnome/nautilus/preferences" = {
+            recursive-search = cfg.recursiveSearch;
+          };
+        }
+      ];
   };
 }
