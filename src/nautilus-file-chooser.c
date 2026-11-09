@@ -776,7 +776,8 @@ nautilus_file_chooser_constructed (GObject *object)
                                  G_CONNECT_SWAPPED);
     }
 
-    if (g_strcmp0 (PROFILE, "") != 0)
+    /* Mako: no striped "devel" header here either, like the main window. */
+    if (g_strcmp0 (PROFILE, "") != 0 && g_getenv ("NAUTILUS_DEVEL_STYLE") != NULL)
     {
         gtk_widget_add_css_class (GTK_WIDGET (self), "devel");
     }
