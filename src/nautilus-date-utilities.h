@@ -45,6 +45,7 @@ nautilus_date_preview_detailed_format (GDateTime *timestamp,
  *
  * Returns: true if the value of @date_time_pointer changed, false otherwise
  */
+#if !GLIB_CHECK_VERSION(2, 90, 0)
 static inline gboolean
 g_set_date_time (GDateTime **date_time_pointer,
                  GDateTime  *new_date_time)
@@ -74,6 +75,7 @@ g_set_date_time (GDateTime **date_time_pointer,
 
     return TRUE;
 }
+#endif
 
 /**
  * g_set_ptr_array: (skip)

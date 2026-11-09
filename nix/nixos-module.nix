@@ -10,7 +10,12 @@ self:
 
 let
   cfg = config.programs.mako-files;
-  inherit (lib) mkEnableOption mkIf mkOption types;
+  inherit (lib)
+    mkEnableOption
+    mkIf
+    mkOption
+    types
+    ;
 in
 {
   options.programs.mako-files = {
@@ -79,8 +84,15 @@ in
     xdg.portal = mkIf cfg.fileChooser {
       enable = true;
       extraPortals = [ cfg.package ];
-      config.common."org.freedesktop.impl.portal.FileChooser" = lib.mkDefault [ "mako" "gnome" "gtk" ];
-      config.gnome."org.freedesktop.impl.portal.FileChooser" = lib.mkDefault [ "mako" "gnome" ];
+      config.common."org.freedesktop.impl.portal.FileChooser" = lib.mkDefault [
+        "mako"
+        "gnome"
+        "gtk"
+      ];
+      config.gnome."org.freedesktop.impl.portal.FileChooser" = lib.mkDefault [
+        "mako"
+        "gnome"
+      ];
     };
 
     programs.dconf.profiles.user.databases = mkIf (cfg.settings != { }) [
