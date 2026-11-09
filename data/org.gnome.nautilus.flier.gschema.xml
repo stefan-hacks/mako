@@ -113,6 +113,11 @@
       <summary>Shortcuts in menus</summary>
       <description>Show the keys next to the items of the bottom bar's menus, to learn them.</description>
     </key>
+    <key type="b" name="run-in-background">
+      <default>true</default>
+      <summary>Run in the background</summary>
+      <description>Keep running after the last window closes, so new windows open at once.</description>
+    </key>
     <key type="b" name="shortcut-hints">
       <default>true</default>
       <summary>Shortcut hints</summary>

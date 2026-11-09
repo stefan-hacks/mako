@@ -952,6 +952,27 @@ nautilus_application_identify_to_portal (GApplication *app)
                             NULL, NULL, NULL);
 }
 
+/* Mako: stay running after the last window closes ("run-in-background"),
+ * so the next window opens at once instead of starting the app again. */
+static void
+update_run_in_background (GSettings   *settings,
+                          const char  *key,
+                          GApplication *app)
+{
+    static gboolean held = FALSE;
+    gboolean want = g_settings_get_boolean (settings, "run-in-background");
+
+    if (want && !held)
+    {
+        g_application_hold (app);
+    }
+    else if (!want && held)
+    {
+        g_application_release (app);
+    }
+    held = want;
+}
+
 static void
 nautilus_application_startup (GApplication *app)
 {
@@ -990,6 +1011,10 @@ nautilus_application_startup (GApplication *app)
 
     /* initialize preferences and create the global GSettings objects */
     nautilus_global_preferences_init ();
+
+    update_run_in_background (nautilus_flier_settings (), NULL, app);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::run-in-background",
+                             G_CALLBACK (update_run_in_background), app, 0);
 
     /* initialize data preference watchers */
     nautilus_date_setup_preferences ();
