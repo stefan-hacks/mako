@@ -161,6 +161,22 @@ sections and places the sidebar shows.
 The settings live in the GSettings schema `org.gnome.nautilus.flier`, so
 they never touch your normal Nautilus settings.
 
+## Install on Ubuntu
+
+Download `mako_<version>_amd64.deb` from the
+[latest release](https://github.com/tommkotzu/mako/releases/latest) and
+install it:
+
+```sh
+sudo apt install ./mako_*_amd64.deb
+```
+
+It is built on Ubuntu 26.04 and needs GTK 4.22 and libadwaita 1.9, so
+older releases can't install it. Mako goes into `/opt/mako` and starts with
+`mako`. It sits next to the regular Files app and doesn't replace it.
+To make it your default file manager, see below. Remove it with
+`sudo apt remove mako`.
+
 ## Build and install
 
 You need the build dependencies of Nautilus 50, with **GTK 4.22** and
