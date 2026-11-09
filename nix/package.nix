@@ -38,7 +38,6 @@ nautilus.overrideAttrs (old: {
     "-Ddocs=false"
     "-Dtests=none"
     "-Dextensions=false"
-    "-Dpackagekit=false"
     "-Dcloudproviders=enabled"
   ];
 
