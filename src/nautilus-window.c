@@ -118,6 +118,13 @@ struct _NautilusWindow
     GtkWidget *mode_columns;    /* weak; the active slot's, for win.view-mode */
     gboolean inspector_placed;
     guint inspector_save_id;
+    GtkWidget *inspector_overlay;  /* over the files, for the drop highlight */
+    GtkWidget *inspector_drop;
+    GtkWidget *inspector_drop_label;
+    GtkWidget *inspector_window;   /* the popped-out inspector, or NULL */
+    int inspector_docked_side;     /* where it goes back to */
+    double inspector_drag_x, inspector_drag_y;
+    int inspector_drag_target;     /* InspectorSide, or -1 */
     GMenuModel *tab_menu_model;
     gboolean tab_bar_inverted;
 
@@ -2236,6 +2243,13 @@ nautilus_window_dispose (GObject *object)
     window = NAUTILUS_WINDOW (object);
 
     g_clear_handle_id (&window->inspector_save_id, g_source_remove);
+    if (window->inspector_window != NULL)
+    {
+        /* The inspector goes with its window. */
+        gtk_window_destroy (GTK_WINDOW (window->inspector_window));
+        window->inspector_window = NULL;
+        window->inspector = NULL;
+    }
     if (window->mode_columns != NULL)
     {
         g_signal_handlers_disconnect_by_func (window->mode_columns, sync_view_mode, window);
@@ -2577,7 +2591,15 @@ typedef enum
     INSPECTOR_LEFT,
     INSPECTOR_BOTTOM,
     INSPECTOR_TOP,
+    INSPECTOR_WINDOW,
 } InspectorSide;
+
+static gboolean
+inspector_docked (NautilusWindow *window)
+{
+    return window->inspector != NULL &&
+           gtk_widget_get_parent (window->inspector) == GTK_WIDGET (window->inspector_paned);
+}
 
 static gboolean
 save_inspector_size (gpointer user_data)
@@ -2591,7 +2613,7 @@ save_inspector_size (gpointer user_data)
     int size = gtk_paned_get_start_child (paned) == window->inspector ? position : total - position;
 
     window->inspector_save_id = 0;
-    if (size > 80)
+    if (size > 80 && inspector_docked (window))
     {
         g_settings_set_int (nautilus_flier_settings (), "inspector-size", size);
     }
@@ -2602,7 +2624,8 @@ save_inspector_size (gpointer user_data)
 static void
 on_inspector_position (NautilusWindow *window)
 {
-    if (window->inspector_placed && gtk_widget_get_visible (window->inspector))
+    if (window->inspector_placed && inspector_docked (window) &&
+        gtk_widget_get_visible (window->inspector))
     {
         g_clear_handle_id (&window->inspector_save_id, g_source_remove);
         window->inspector_save_id = g_timeout_add (400, save_inspector_size, window);
@@ -2619,7 +2642,7 @@ place_inspector (NautilusWindow *window)
                 ? gtk_widget_get_width (GTK_WIDGET (paned))
                 : gtk_widget_get_height (GTK_WIDGET (paned));
 
-    if (total <= 0 || !gtk_widget_get_visible (window->inspector))
+    if (total <= 0 || !inspector_docked (window) || !gtk_widget_get_visible (window->inspector))
     {
         return;
     }
@@ -2639,19 +2662,139 @@ on_paned_max_position (NautilusWindow *window)
     }
 }
 
+/* The popped-out inspector forwards its buttons to this window's file view. */
+static void
+forward_view_action (GSimpleAction *action,
+                     GVariant      *parameter,
+                     gpointer       user_data)
+{
+    g_autofree char *name = g_strconcat ("view.", g_action_get_name (G_ACTION (action)), NULL);
+
+    gtk_widget_activate_action_variant (GTK_WIDGET (user_data), name, parameter);
+}
+
+static gboolean
+on_inspector_window_close (GtkWindow      *inspector_window,
+                           NautilusWindow *window)
+{
+    /* Closing the floating inspector docks it again. */
+    g_settings_set_enum (nautilus_flier_settings (), "inspector-side", window->inspector_docked_side);
+    return TRUE;
+}
+
+static void
+pop_out_inspector (NautilusWindow *window)
+{
+    static const GActionEntry view_entries[] =
+    {
+        { .name = "preview-selection", .activate = forward_view_action },
+        { .name = "open-with-default-application", .activate = forward_view_action },
+        { .name = "edit-tags", .activate = forward_view_action },
+    };
+    GtkWidget *content;
+
+    if (window->inspector_window == NULL)
+    {
+        g_autoptr (GSimpleActionGroup) view_actions = g_simple_action_group_new ();
+        int width = MAX (g_settings_get_int (nautilus_flier_settings (), "inspector-size"), 300);
+
+        content = adw_toolbar_view_new ();
+        window->inspector_window = adw_window_new ();
+        gtk_window_set_title (GTK_WINDOW (window->inspector_window), _("Inspector"));
+        gtk_window_set_transient_for (GTK_WINDOW (window->inspector_window), GTK_WINDOW (window));
+        gtk_window_set_default_size (GTK_WINDOW (window->inspector_window), width,
+                                     MAX (gtk_widget_get_height (GTK_WIDGET (window)) * 4 / 5, 480));
+        g_action_map_add_action_entries (G_ACTION_MAP (view_actions), view_entries,
+                                         G_N_ELEMENTS (view_entries), window);
+        gtk_widget_insert_action_group (window->inspector_window, "view", G_ACTION_GROUP (view_actions));
+        gtk_widget_insert_action_group (window->inspector_window, "win", G_ACTION_GROUP (window));
+        g_signal_connect (window->inspector_window, "close-request",
+                          G_CALLBACK (on_inspector_window_close), window);
+        adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (content), adw_header_bar_new ());
+        adw_window_set_content (ADW_WINDOW (window->inspector_window), content);
+    }
+    content = adw_window_get_content (ADW_WINDOW (window->inspector_window));
+
+    if (!inspector_docked (window) && gtk_widget_get_parent (window->inspector) != NULL)
+    {
+        return;
+    }
+    g_object_ref (window->inspector);
+    if (inspector_docked (window))
+    {
+        if (gtk_paned_get_start_child (window->inspector_paned) == window->inspector)
+        {
+            gtk_paned_set_start_child (window->inspector_paned, NULL);
+        }
+        else
+        {
+            gtk_paned_set_end_child (window->inspector_paned, NULL);
+        }
+    }
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (content), window->inspector);
+    g_object_unref (window->inspector);
+    nautilus_inspector_set_detached (NAUTILUS_INSPECTOR (window->inspector), TRUE);
+}
+
+static void
+dock_inspector (NautilusWindow *window)
+{
+    if (window->inspector_window == NULL)
+    {
+        return;
+    }
+    g_object_ref (window->inspector);
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (adw_window_get_content (ADW_WINDOW (window->inspector_window))),
+                                  NULL);
+    gtk_window_destroy (GTK_WINDOW (window->inspector_window));
+    window->inspector_window = NULL;
+    nautilus_inspector_set_detached (NAUTILUS_INSPECTOR (window->inspector), FALSE);
+    /* Floating; arrange_inspector() puts it into the paned and drops this ref. */
+}
+
 static void
 arrange_inspector (NautilusWindow *window)
 {
     GSettings *flier = nautilus_flier_settings ();
     InspectorSide side = g_settings_get_enum (flier, "inspector-side");
+    gboolean visible = g_settings_get_boolean (flier, "inspector-visible");
     GtkPaned *paned = window->inspector_paned;
     GtkWidget *layout = GTK_WIDGET (window->tile_layout);
     gboolean first = side == INSPECTOR_LEFT || side == INSPECTOR_TOP;
-    GtkWidget *start = first ? window->inspector : layout;
-    GtkWidget *end = first ? layout : window->inspector;
+    gboolean was_floating = window->inspector_window != NULL;
+    GtkWidget *start;
+    GtkWidget *end;
 
+    if (window->inspector == NULL)
+    {
+        return;
+    }
+
+    if (side == INSPECTOR_WINDOW)
+    {
+        pop_out_inspector (window);
+        gtk_widget_set_visible (window->inspector, TRUE);
+        gtk_widget_set_visible (window->inspector_window, visible);
+        if (visible)
+        {
+            gtk_window_present (GTK_WINDOW (window->inspector_window));
+        }
+        return;
+    }
+
+    window->inspector_docked_side = side;
+    if (was_floating)
+    {
+        dock_inspector (window);
+    }
+    else
+    {
+        g_object_ref (window->inspector);
+    }
+
+    start = first ? window->inspector : layout;
+    end = first ? layout : window->inspector;
     g_object_ref (layout);
-    g_object_ref (window->inspector);
     gtk_paned_set_start_child (paned, NULL);
     gtk_paned_set_end_child (paned, NULL);
     gtk_orientable_set_orientation (GTK_ORIENTABLE (paned),
@@ -2666,14 +2809,163 @@ arrange_inspector (NautilusWindow *window)
     g_object_unref (layout);
     g_object_unref (window->inspector);
 
-    gtk_widget_set_visible (window->inspector, g_settings_get_boolean (flier, "inspector-visible"));
+    gtk_widget_set_visible (window->inspector, visible);
     window->inspector_placed = FALSE;
     place_inspector (window);
 }
 
 static void
+action_inspector_pop_out (GSimpleAction *action,
+                          GVariant      *parameter,
+                          gpointer       user_data)
+{
+    NautilusWindow *window = user_data;
+    GSettings *flier = nautilus_flier_settings ();
+
+    if (g_settings_get_enum (flier, "inspector-side") == INSPECTOR_WINDOW)
+    {
+        g_settings_set_enum (flier, "inspector-side", window->inspector_docked_side);
+    }
+    else
+    {
+        g_settings_set_enum (flier, "inspector-side", INSPECTOR_WINDOW);
+    }
+    g_settings_set_boolean (flier, "inspector-visible", TRUE);
+}
+
+/* Dragging the inspector's grip: the side nearest the pointer gets a
+ * highlight, and letting go out of the window pops the inspector out. */
+static int
+inspector_drop_target (NautilusWindow *window,
+                       double          x,
+                       double          y)
+{
+    GtkWidget *overlay = window->inspector_overlay;
+    double w = gtk_widget_get_width (overlay), h = gtk_widget_get_height (overlay);
+    graphene_point_t in_window;
+    double left, right, top, bottom, best;
+    int side;
+
+    if (gtk_widget_compute_point (overlay, GTK_WIDGET (window), &GRAPHENE_POINT_INIT (x, y), &in_window) &&
+        (in_window.x < -8 || in_window.y < -8 ||
+         in_window.x > gtk_widget_get_width (GTK_WIDGET (window)) + 8 ||
+         in_window.y > gtk_widget_get_height (GTK_WIDGET (window)) + 8))
+    {
+        return INSPECTOR_WINDOW;
+    }
+
+    left = x; right = w - x; top = y; bottom = h - y;
+    best = left; side = INSPECTOR_LEFT;
+    if (right < best) { best = right; side = INSPECTOR_RIGHT; }
+    if (top < best) { best = top; side = INSPECTOR_TOP; }
+    if (bottom < best) { side = INSPECTOR_BOTTOM; }
+    return side;
+}
+
+static void
+show_inspector_drop (NautilusWindow *window,
+                     int             target)
+{
+    GtkWidget *drop = window->inspector_drop;
+    double w = gtk_widget_get_width (window->inspector_overlay);
+    double h = gtk_widget_get_height (window->inspector_overlay);
+    int size = CLAMP (g_settings_get_int (nautilus_flier_settings (), "inspector-size"), 200, 480);
+    gboolean vertical = target == INSPECTOR_TOP || target == INSPECTOR_BOTTOM;
+
+    window->inspector_drag_target = target;
+    if (target < 0)
+    {
+        gtk_widget_set_visible (drop, FALSE);
+        return;
+    }
+
+    gtk_widget_set_halign (drop, target == INSPECTOR_LEFT ? GTK_ALIGN_START
+                           : target == INSPECTOR_RIGHT ? GTK_ALIGN_END
+                           : target == INSPECTOR_WINDOW ? GTK_ALIGN_CENTER : GTK_ALIGN_FILL);
+    gtk_widget_set_valign (drop, target == INSPECTOR_TOP ? GTK_ALIGN_START
+                           : target == INSPECTOR_BOTTOM ? GTK_ALIGN_END
+                           : target == INSPECTOR_WINDOW ? GTK_ALIGN_CENTER : GTK_ALIGN_FILL);
+    if (target == INSPECTOR_WINDOW)
+    {
+        gtk_widget_set_size_request (drop, 260, 120);
+    }
+    else
+    {
+        gtk_widget_set_size_request (drop, vertical ? -1 : MIN (size, (int) w / 2),
+                                     vertical ? MIN (size, (int) h / 2) : -1);
+    }
+    gtk_label_set_label (GTK_LABEL (window->inspector_drop_label),
+                         target == INSPECTOR_WINDOW ? _("Release to Pop Out") : "");
+    gtk_widget_set_visible (drop, TRUE);
+}
+
+static void
+on_inspector_drag_begin (GtkGestureDrag *gesture,
+                         double          x,
+                         double          y,
+                         NautilusWindow *window)
+{
+    GtkWidget *grip = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+    graphene_point_t point;
+
+    window->inspector_drag_target = -1;
+    if (!gtk_widget_compute_point (grip, window->inspector_overlay, &GRAPHENE_POINT_INIT (x, y), &point))
+    {
+        gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_DENIED);
+        return;
+    }
+    window->inspector_drag_x = point.x;
+    window->inspector_drag_y = point.y;
+}
+
+static void
+on_inspector_drag_update (GtkGestureDrag *gesture,
+                          double          dx,
+                          double          dy,
+                          NautilusWindow *window)
+{
+    if (window->inspector_drag_target < 0 && hypot (dx, dy) < 12)
+    {
+        return;
+    }
+    gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    gtk_widget_set_cursor_from_name (window->inspector_overlay, "grabbing");
+    show_inspector_drop (window, inspector_drop_target (window, window->inspector_drag_x + dx,
+                                                        window->inspector_drag_y + dy));
+}
+
+static void
+on_inspector_drag_end (GtkGestureDrag *gesture,
+                       double          dx,
+                       double          dy,
+                       NautilusWindow *window)
+{
+    int target = window->inspector_drag_target;
+
+    show_inspector_drop (window, -1);
+    gtk_widget_set_cursor (window->inspector_overlay, NULL);
+    if (target >= 0)
+    {
+        g_settings_set_enum (nautilus_flier_settings (), "inspector-side", target);
+    }
+}
+
+static void
+on_inspector_drag_cancel (GtkGesture       *gesture,
+                          GdkEventSequence *sequence,
+                          NautilusWindow   *window)
+{
+    show_inspector_drop (window, -1);
+    gtk_widget_set_cursor (window->inspector_overlay, NULL);
+}
+
+static void
 on_active_slot_for_inspector (NautilusWindow *window)
 {
+    if (window->inspector == NULL)
+    {
+        return;
+    }
     nautilus_inspector_set_slot (NAUTILUS_INSPECTOR (window->inspector), window->active_slot);
 }
 
@@ -2685,6 +2977,13 @@ move_inspector (gboolean clockwise)
     GSettings *flier = nautilus_flier_settings ();
     InspectorSide side = g_settings_get_enum (flier, "inspector-side");
     guint at = 0;
+
+    if (side == INSPECTOR_WINDOW)
+    {
+        g_settings_set_enum (flier, "inspector-side", INSPECTOR_RIGHT);
+        g_settings_set_boolean (flier, "inspector-visible", TRUE);
+        return;
+    }
 
     for (guint i = 0; i < G_N_ELEMENTS (order); i++)
     {
@@ -2827,20 +3126,45 @@ setup_inspector (NautilusWindow *window)
     {
         { .name = "inspector-side-next", .activate = action_inspector_side_next },
         { .name = "inspector-side-previous", .activate = action_inspector_side_previous },
+        { .name = "inspector-pop-out", .activate = action_inspector_pop_out },
         { .name = "view-mode", .parameter_type = "u", .state = "uint32 1", .change_state = action_view_mode },
         { .name = "view-step", .parameter_type = "i", .activate = action_view_step },
         { .name = "show-tag", .parameter_type = "s", .activate = action_show_tag },
         { .name = "flat-view", .state = "false", .change_state = action_flat_view },
     };
 
+    GtkGesture *drag;
+
     window->inspector = nautilus_inspector_new ();
+    window->inspector_docked_side = INSPECTOR_RIGHT;
+    window->inspector_drag_target = -1;
     window->inspector_paned = GTK_PANED (gtk_paned_new (GTK_ORIENTATION_HORIZONTAL));
     gtk_paned_set_wide_handle (window->inspector_paned, FALSE);
     gtk_widget_add_css_class (GTK_WIDGET (window->inspector_paned), "inspector-paned");
 
+    /* Where a dragged inspector would land. */
+    window->inspector_overlay = gtk_overlay_new ();
+    gtk_overlay_set_child (GTK_OVERLAY (window->inspector_overlay), GTK_WIDGET (window->inspector_paned));
+    window->inspector_drop = adw_bin_new ();
+    window->inspector_drop_label = gtk_label_new (NULL);
+    adw_bin_set_child (ADW_BIN (window->inspector_drop), window->inspector_drop_label);
+    gtk_widget_add_css_class (window->inspector_drop, "inspector-drop");
+    gtk_widget_set_can_target (window->inspector_drop, FALSE);
+    gtk_widget_set_visible (window->inspector_drop, FALSE);
+    gtk_overlay_add_overlay (GTK_OVERLAY (window->inspector_overlay), window->inspector_drop);
+
+    drag = gtk_gesture_drag_new ();
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (drag), GDK_BUTTON_PRIMARY);
+    g_signal_connect (drag, "drag-begin", G_CALLBACK (on_inspector_drag_begin), window);
+    g_signal_connect (drag, "drag-update", G_CALLBACK (on_inspector_drag_update), window);
+    g_signal_connect (drag, "drag-end", G_CALLBACK (on_inspector_drag_end), window);
+    g_signal_connect (drag, "cancel", G_CALLBACK (on_inspector_drag_cancel), window);
+    gtk_widget_add_controller (nautilus_inspector_get_grip (NAUTILUS_INSPECTOR (window->inspector)),
+                               GTK_EVENT_CONTROLLER (drag));
+
     /* In the tiles' place in the template. */
     g_object_ref (layout);
-    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (parent), GTK_WIDGET (window->inspector_paned));
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (parent), window->inspector_overlay);
     gtk_paned_set_start_child (window->inspector_paned, layout);
     g_object_unref (layout);
     arrange_inspector (window);

@@ -23,4 +23,11 @@ GtkWidget *nautilus_inspector_new      (void);
 void       nautilus_inspector_set_slot (NautilusInspector  *self,
                                         NautilusWindowSlot *slot);
 
+/* The header that can be dragged to move the panel. */
+GtkWidget *nautilus_inspector_get_grip (NautilusInspector *self);
+
+/* Whether the panel is in its own window (no grip, a dock button). */
+void       nautilus_inspector_set_detached (NautilusInspector *self,
+                                            gboolean           detached);
+
 G_END_DECLS

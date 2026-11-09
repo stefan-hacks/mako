@@ -40,6 +40,9 @@ struct _NautilusInspector
     GList *files;              /* shown */
     gboolean is_folder;        /* showing the slot's folder */
 
+    GtkWidget *header;         /* grip to drag the panel, pop-out button */
+    GtkWidget *grip;
+    GtkWidget *pop_button;
     GtkWidget *scroller;
     GtkStack *preview;
     NautilusQlCanvas *canvas;
@@ -531,6 +534,28 @@ nautilus_inspector_init (NautilusInspector *self)
     GtkWidget *button;
 
     gtk_widget_add_css_class (GTK_WIDGET (self), "inspector");
+    gtk_orientable_set_orientation (GTK_ORIENTABLE (gtk_widget_get_layout_manager (GTK_WIDGET (self))),
+                                    GTK_ORIENTATION_VERTICAL);
+
+    /* Header: a grip to drag the panel to another side (or out of the
+     * window), and a button to pop it out or dock it again. */
+    self->header = gtk_center_box_new ();
+    gtk_widget_add_css_class (self->header, "inspector-header");
+    gtk_widget_set_cursor_from_name (self->header, "grab");
+    gtk_widget_set_tooltip_text (self->header, _("Drag to move the inspector to another side, or out of the window"));
+    self->grip = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class (self->grip, "inspector-grip");
+    gtk_widget_set_valign (self->grip, GTK_ALIGN_CENTER);
+    gtk_center_box_set_center_widget (GTK_CENTER_BOX (self->header), self->grip);
+    self->pop_button = gtk_button_new_from_icon_name ("window-new-symbolic");
+    gtk_widget_add_css_class (self->pop_button, "flat");
+    gtk_widget_add_css_class (self->pop_button, "circular");
+    gtk_widget_set_cursor_from_name (self->pop_button, "default");
+    gtk_widget_set_tooltip_text (self->pop_button, _("Pop Out"));
+    gtk_actionable_set_action_name (GTK_ACTIONABLE (self->pop_button), "win.inspector-pop-out");
+    gtk_center_box_set_end_widget (GTK_CENTER_BOX (self->header), self->pop_button);
+    gtk_widget_set_parent (self->header, GTK_WIDGET (self));
+
     gtk_widget_set_margin_start (box, 12);
     gtk_widget_set_margin_end (box, 12);
     gtk_widget_set_margin_top (box, 12);
@@ -622,6 +647,7 @@ nautilus_inspector_init (NautilusInspector *self)
     self->scroller = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (self->scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (self->scroller), box);
+    gtk_widget_set_vexpand (self->scroller, TRUE);
     gtk_widget_set_parent (self->scroller, GTK_WIDGET (self));
 
     g_signal_connect (self, "map", G_CALLBACK (on_map), NULL);
@@ -649,6 +675,11 @@ nautilus_inspector_dispose (GObject *object)
         gtk_widget_unparent (self->scroller);
         self->scroller = NULL;
     }
+    if (self->header != NULL)
+    {
+        gtk_widget_unparent (self->header);
+        self->header = NULL;
+    }
 
     G_OBJECT_CLASS (nautilus_inspector_parent_class)->dispose (object);
 }
@@ -657,7 +688,7 @@ static void
 nautilus_inspector_class_init (NautilusInspectorClass *klass)
 {
     G_OBJECT_CLASS (klass)->dispose = nautilus_inspector_dispose;
-    gtk_widget_class_set_layout_manager_type (GTK_WIDGET_CLASS (klass), GTK_TYPE_BIN_LAYOUT);
+    gtk_widget_class_set_layout_manager_type (GTK_WIDGET_CLASS (klass), GTK_TYPE_BOX_LAYOUT);
     gtk_widget_class_set_css_name (GTK_WIDGET_CLASS (klass), "nautilus-inspector");
 }
 
@@ -665,4 +696,28 @@ GtkWidget *
 nautilus_inspector_new (void)
 {
     return g_object_new (NAUTILUS_TYPE_INSPECTOR, NULL);
+}
+
+GtkWidget *
+nautilus_inspector_get_grip (NautilusInspector *self)
+{
+    g_return_val_if_fail (NAUTILUS_IS_INSPECTOR (self), NULL);
+
+    return self->header;
+}
+
+void
+nautilus_inspector_set_detached (NautilusInspector *self,
+                                 gboolean           detached)
+{
+    g_return_if_fail (NAUTILUS_IS_INSPECTOR (self));
+
+    /* In its own window the panel is moved by the window's title bar. */
+    gtk_widget_set_visible (self->grip, !detached);
+    gtk_widget_set_cursor_from_name (self->header, detached ? NULL : "grab");
+    gtk_widget_set_tooltip_text (self->header, detached ? NULL
+                                 : _("Drag to move the inspector to another side, or out of the window"));
+    gtk_button_set_icon_name (GTK_BUTTON (self->pop_button),
+                              detached ? "sidebar-show-right-symbolic" : "window-new-symbolic");
+    gtk_widget_set_tooltip_text (self->pop_button, detached ? _("Dock in the Window") : _("Pop Out"));
 }

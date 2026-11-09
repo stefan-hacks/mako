@@ -41,7 +41,7 @@ https://github.com/user-attachments/assets/1a1a578e-7426-485a-a1e6-026c1ab35ce3
 | **Four views** | List, tree, Miller columns and grid. `Alt+1` to `Alt+4` switch between them. |
 | **Tiles** | Split the window into panes, each with its own tab bar. `Ctrl+Tab` goes through every tab of every tile. |
 | **Quick Look** | `Space` previews many files at once on a zoomable canvas. Rate, play videos frame by frame and read text files. |
-| **Inspector** | A side panel with the preview, rating, tags and details of the selection. It can sit on any side. |
+| **Inspector** | A side panel with the preview, rating, tags and details of the selection. Drag its grip to any side of the window, or out of the window to pop it out into its own window. |
 | **Ratings and tags** | Stored on the files as extended attributes, the same ones Dolphin uses (`user.baloo.rating`, `user.xdg.tags`). |
 | **Sidebar** | Groups you can fold and reorder (Bookmarks, Places, Recent, Tags, Storage). Every item can get a color. |
 | **Commands** | `F1` or `Ctrl+K` opens a searchable list of every command, and any key can be changed there. |
