@@ -158,7 +158,7 @@ and press a new one.
 ## Settings
 
 Most of what Mako adds can be switched in **Preferences →
-Organize**: the density (comfortable, compact or dense rows in the list,
+Organize**: the density (comfortable, compact, dense or extra dense, which also draws the icons smaller, in the list,
 grid, columns and sidebar), ratings, tags, folder colors and their scheme, the built-in
 Quick Look, shortcut hints, keys in menus, sidebar groups and which
 sections and places the sidebar shows. The density is also in the bottom

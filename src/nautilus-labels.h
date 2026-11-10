@@ -32,6 +32,10 @@ NautilusLabels *nautilus_labels_get              (void);
 
 GSettings      *nautilus_flier_settings          (void);
 
+/* @size, the zoom's icon size, as the density draws it: three quarters
+ * in "extra-dense" (not below 16), as it is otherwise. */
+guint           nautilus_density_icon_size       (guint         size);
+
 /* Ratings and tags. The change shows at once; the files are written to in
  * the background. */
 void            nautilus_labels_set_rating       (GList        *files,

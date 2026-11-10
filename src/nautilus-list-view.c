@@ -12,6 +12,7 @@
 #include <nautilus-extension.h>
 
 #include "nautilus-columns.h"
+#include "nautilus-labels.h"
 #include "nautilus-list-base-private.h"
 #include "nautilus-list-view.h"
 
@@ -120,7 +121,13 @@ real_get_icon_size (NautilusListBase *list_base_view)
 {
     NautilusListView *self = NAUTILUS_LIST_VIEW (list_base_view);
 
-    return get_icon_size_for_zoom_level (self->zoom_level);
+    return nautilus_density_icon_size (get_icon_size_for_zoom_level (self->zoom_level));
+}
+
+static void
+on_density_changed (NautilusListView *self)
+{
+    g_object_notify (G_OBJECT (self), "icon-size");
 }
 
 static int
@@ -1392,6 +1399,9 @@ nautilus_list_view_init (NautilusListView *self)
     GtkShortcut *shortcut;
 
     gtk_widget_add_css_class (GTK_WIDGET (self), "nautilus-list-view");
+    /* "extra-dense" draws the icons smaller. */
+    g_signal_connect_object (nautilus_flier_settings (), "changed::density",
+                             G_CALLBACK (on_density_changed), self, G_CONNECT_SWAPPED);
 
     g_signal_connect_object (nautilus_list_view_preferences,
                              "changed::" NAUTILUS_PREFERENCES_LIST_VIEW_DEFAULT_VISIBLE_COLUMNS,

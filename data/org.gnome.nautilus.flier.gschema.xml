@@ -12,6 +12,7 @@
     <value nick="comfortable" value="0"/>
     <value nick="compact" value="1"/>
     <value nick="dense" value="2"/>
+    <value nick="extra-dense" value="3"/>
   </enum>
   <enum id="org.gnome.nautilus.flier.InspectorSide">
     <value value="0" nick="right"/>
@@ -27,7 +28,7 @@
     <key name="density" enum="org.gnome.nautilus.flier.Density">
       <default>'comfortable'</default>
       <summary>Density</summary>
-      <description>How much room rows and items get in the list, grid, columns and sidebar: “comfortable” as GNOME Files has it, “compact” or “dense”. Icon sizes stay as the zoom sets them.</description>
+      <description>How much room rows and items get in the list, grid, columns and sidebar: “comfortable” as GNOME Files has it, “compact”, “dense” or “extra-dense”. Icon sizes stay as the zoom sets them, except in “extra-dense”, which draws them at three quarters.</description>
     </key>
     <key name="folder-color-scheme" enum="org.gnome.nautilus.flier.FolderColorScheme">
       <default>'pastel'</default>

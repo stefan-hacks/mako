@@ -615,14 +615,15 @@ nautilus_labels_preferences_page_new (void)
         {
             { "comfortable", N_("_Comfortable"), N_("As in GNOME Files") },
             { "compact", N_("C_ompact"), N_("Less room around rows and items") },
-            { "dense", N_("_Dense"), N_("As many rows as fit") },
+            { "dense", N_("_Dense"), N_("Rows close together") },
+            { "extra-dense", N_("_Extra Dense"), N_("As many rows as fit, with smaller icons") },
         };
         GtkWidget *first = NULL;
 
         group = adw_preferences_group_new ();
         adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (group), _("Density"));
         adw_preferences_group_set_description (ADW_PREFERENCES_GROUP (group),
-                                               _("The list, grid, columns and sidebar. Icon sizes follow the zoom."));
+                                               _("The list, grid, columns and sidebar. Icon sizes follow the zoom, smaller in Extra Dense."));
         for (guint i = 0; i < G_N_ELEMENTS (densities); i++)
         {
             GtkWidget *check = gtk_check_button_new ();

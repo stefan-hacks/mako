@@ -3273,7 +3273,7 @@ on_window_active_changed (GtkWindow *window)
 static void
 update_density (NautilusWindow *window)
 {
-    static const char *classes[] = { NULL, "density-compact", "density-dense" };
+    static const char *classes[] = { NULL, "density-compact", "density-dense", "density-extra-dense" };
     int density = g_settings_get_enum (nautilus_flier_settings (), "density");
 
     for (guint i = 1; i < G_N_ELEMENTS (classes); i++)

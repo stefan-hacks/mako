@@ -417,6 +417,7 @@ build_views_popover (void)
     g_menu_append (density, _("Co_mfortable"), "bar.density('comfortable')");
     g_menu_append (density, _("Com_pact"), "bar.density('compact')");
     g_menu_append (density, _("_Dense"), "bar.density('dense')");
+    g_menu_append (density, _("_Extra Dense"), "bar.density('extra-dense')");
     g_menu_append_section (menu, _("Density"), G_MENU_MODEL (density));
 
     append_item (more, _("_Flat View"), "win.flat-view");

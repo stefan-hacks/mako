@@ -496,7 +496,7 @@ nautilus-bottom-bar > .toolbar { padding: 4px 6px; }
 .navigation-sidebar.sidebar-grouped row:not(.sidebar-group-header) > revealer > box { margin-left: 12px; }
 
 /* Density (Preferences → Organize). Only spacing changes; icon sizes stay
- * with the zoom. In the columns, the side columns (navigation-sidebar
+ * with the zoom, except in extra-dense (nautilus_density_icon_size ()). In the columns, the side columns (navigation-sidebar
  * rows) and the middle one (list view cells) are kept the same height at
  * every density, so a folder looks the same in both. */
 window.density-compact .nautilus-list-view columnview > listview { border-spacing: 4px; }
@@ -522,3 +522,14 @@ window.density-compact nautilus-columns .miller-column > row { min-height: 32px;
 window.density-dense nautilus-columns.columns-on .nautilus-list-view columnview > listview { border-spacing: 0; }
 window.density-dense nautilus-columns.columns-on .nautilus-list-view .nautilus-view-cell { padding: 0 8px; }
 window.density-dense nautilus-columns .miller-column > row { min-height: 32px; margin-bottom: 0; }
+
+/* Extra dense: no room left between rows, and smaller icons. */
+window.density-extra-dense .nautilus-list-view columnview > listview { border-spacing: 0; }
+window.density-extra-dense .nautilus-list-view columnview > listview > row { min-height: 0; }
+window.density-extra-dense .nautilus-list-view .nautilus-view-cell { padding-top: 0; padding-bottom: 0; }
+window.density-extra-dense .nautilus-grid-view gridview { padding: 6px; border-spacing: 0; }
+window.density-extra-dense .nautilus-grid-view .nautilus-view-cell { padding: 1px; }
+window.density-extra-dense .navigation-sidebar > row { min-height: 22px; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
+window.density-extra-dense nautilus-columns.columns-on .nautilus-list-view columnview > listview { border-spacing: 0; }
+window.density-extra-dense nautilus-columns.columns-on .nautilus-list-view .nautilus-view-cell { padding: 0 8px; }
+window.density-extra-dense nautilus-columns .miller-column > row { min-height: 24px; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }

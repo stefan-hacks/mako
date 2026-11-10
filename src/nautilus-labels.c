@@ -147,6 +147,16 @@ nautilus_flier_settings (void)
     return settings;
 }
 
+guint
+nautilus_density_icon_size (guint size)
+{
+    if (g_settings_get_enum (nautilus_flier_settings (), "density") == 3)
+    {
+        return MAX (16, size * 3 / 4);
+    }
+    return size;
+}
+
 static void
 update_scheme_colors (NautilusLabels *self)
 {

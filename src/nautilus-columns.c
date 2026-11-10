@@ -428,17 +428,17 @@ list_icon_size (NautilusColumns *self)
     {
         case NAUTILUS_LIST_ZOOM_LEVEL_MEDIUM:
         {
-            return NAUTILUS_LIST_ICON_SIZE_MEDIUM;
+            return nautilus_density_icon_size (NAUTILUS_LIST_ICON_SIZE_MEDIUM);
         }
 
         case NAUTILUS_LIST_ZOOM_LEVEL_LARGE:
         {
-            return NAUTILUS_LIST_ICON_SIZE_LARGE;
+            return nautilus_density_icon_size (NAUTILUS_LIST_ICON_SIZE_LARGE);
         }
 
         default:
         {
-            return NAUTILUS_LIST_ICON_SIZE_SMALL;
+            return nautilus_density_icon_size (NAUTILUS_LIST_ICON_SIZE_SMALL);
         }
     }
 }
@@ -1513,6 +1513,18 @@ on_columns_width_changed (NautilusColumns *self)
     gtk_widget_queue_allocate (GTK_WIDGET (self));
 }
 
+/* "extra-dense" draws the icons smaller: build the columns again. */
+static void
+on_density_changed (NautilusColumns *self)
+{
+    clear_parents (self, 0);
+    g_clear_object (&self->shown_location);
+    g_clear_object (&self->child_item);
+    g_clear_object (&self->child_shown);
+    clear_box (self->child_column);
+    schedule_update (self);
+}
+
 static void
 nautilus_columns_init (NautilusColumns *self)
 {
@@ -1574,6 +1586,8 @@ nautilus_columns_init (NautilusColumns *self)
     self->column_width = g_settings_get_int (nautilus_flier_settings (), "columns-width");
     g_signal_connect_object (nautilus_flier_settings (), "changed::columns-width",
                              G_CALLBACK (on_columns_width_changed), self, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::density",
+                             G_CALLBACK (on_density_changed), self, G_CONNECT_SWAPPED);
 
     controller = gtk_event_controller_key_new ();
     gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_CAPTURE);

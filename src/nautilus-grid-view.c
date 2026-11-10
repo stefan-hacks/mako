@@ -9,6 +9,7 @@
 #include "nautilus-file.h"
 #include "nautilus-global-preferences.h"
 #include "nautilus-grid-cell.h"
+#include "nautilus-labels.h"
 #include "nautilus-list-base-private.h"
 #include "nautilus-view-cell.h"
 #include "nautilus-view-item.h"
@@ -326,7 +327,7 @@ real_get_icon_size (NautilusListBase *list_base_view)
 {
     NautilusGridView *self = NAUTILUS_GRID_VIEW (list_base_view);
 
-    return get_icon_size_for_zoom_level (self->zoom_level);
+    return nautilus_density_icon_size (get_icon_size_for_zoom_level (self->zoom_level));
 }
 
 static int
@@ -560,6 +561,8 @@ nautilus_grid_view_init (NautilusGridView *self)
     gtk_widget_add_css_class (GTK_WIDGET (self), "nautilus-grid-view");
 
     set_captions_from_preferences (self);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::density",
+                             G_CALLBACK (on_captions_preferences_changed), self, G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_icon_view_preferences,
                              "changed::" NAUTILUS_PREFERENCES_ICON_VIEW_CAPTIONS,
                              G_CALLBACK (on_captions_preferences_changed),
