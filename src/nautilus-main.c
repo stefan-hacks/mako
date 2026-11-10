@@ -42,6 +42,132 @@
 #include <string.h>
 #include <unistd.h>
 
+/* With portals off (see main), GTK on Wayland falls back to built-in
+ * defaults (Adwaita icons, Sans 10) instead of the desktop's settings. Feed
+ * GtkSettings from the same GSettings keys the GNOME portal serves. */
+static const struct
+{
+    const char *schema;
+    const char *key;
+    const char *property;
+} host_settings[] =
+{
+    { "org.gnome.desktop.interface", "gtk-theme", "gtk-theme-name" },
+    { "org.gnome.desktop.interface", "icon-theme", "gtk-icon-theme-name" },
+    { "org.gnome.desktop.interface", "cursor-theme", "gtk-cursor-theme-name" },
+    { "org.gnome.desktop.interface", "cursor-size", "gtk-cursor-theme-size" },
+    { "org.gnome.desktop.interface", "font-name", "gtk-font-name" },
+    { "org.gnome.desktop.interface", "font-rendering", "gtk-font-rendering" },
+    { "org.gnome.desktop.interface", "cursor-blink", "gtk-cursor-blink" },
+    { "org.gnome.desktop.interface", "cursor-blink-time", "gtk-cursor-blink-time" },
+    { "org.gnome.desktop.interface", "cursor-blink-timeout", "gtk-cursor-blink-timeout" },
+    { "org.gnome.desktop.interface", "gtk-im-module", "gtk-im-module" },
+    { "org.gnome.desktop.interface", "enable-animations", "gtk-enable-animations" },
+    { "org.gnome.desktop.interface", "gtk-enable-primary-paste", "gtk-enable-primary-paste" },
+    { "org.gnome.desktop.interface", "overlay-scrolling", "gtk-overlay-scrolling" },
+    { "org.gnome.desktop.peripherals.mouse", "double-click", "gtk-double-click-time" },
+    { "org.gnome.desktop.peripherals.mouse", "drag-threshold", "gtk-dnd-drag-threshold" },
+    { "org.gnome.desktop.wm.preferences", "button-layout", "gtk-decoration-layout" },
+    { "org.gnome.desktop.wm.preferences", "action-double-click-titlebar", "gtk-titlebar-double-click" },
+    { "org.gnome.desktop.wm.preferences", "action-middle-click-titlebar", "gtk-titlebar-middle-click" },
+    { "org.gnome.desktop.wm.preferences", "action-right-click-titlebar", "gtk-titlebar-right-click" },
+    { "org.gnome.desktop.sound", "theme-name", "gtk-sound-theme-name" },
+    { "org.gnome.desktop.sound", "event-sounds", "gtk-enable-event-sounds" },
+    { "org.gnome.desktop.sound", "input-feedback-sounds", "gtk-enable-input-feedback-sounds" },
+    { "org.gnome.desktop.privacy", "remember-recent-files", "gtk-recent-files-enabled" },
+    { "org.gnome.desktop.privacy", "recent-files-max-age", "gtk-recent-files-max-age" },
+};
+
+static GSettings *
+host_settings_get (GHashTable *cache,
+                   const char *schema_id,
+                   const char *key)
+{
+    GSettingsSchemaSource *source = g_settings_schema_source_get_default ();
+    g_autoptr (GSettingsSchema) schema = NULL;
+    GSettings *settings;
+
+    if (source == NULL)
+    {
+        return NULL;
+    }
+    schema = g_settings_schema_source_lookup (source, schema_id, TRUE);
+    if (schema == NULL || (key != NULL && !g_settings_schema_has_key (schema, key)))
+    {
+        return NULL;
+    }
+    settings = g_hash_table_lookup (cache, schema_id);
+    if (settings == NULL)
+    {
+        settings = g_settings_new_full (schema, NULL, NULL);
+        g_hash_table_insert (cache, (gpointer) schema_id, settings);
+    }
+    return settings;
+}
+
+/* Text scaling and font smoothing are stored differently from how
+ * GtkSettings wants them, so they are converted rather than bound. */
+static void
+host_settings_update_fonts (GSettings *interface)
+{
+    GtkSettings *gtk = gtk_settings_get_default ();
+    g_autofree char *antialiasing = g_settings_get_string (interface, "font-antialiasing");
+    g_autofree char *hinting = g_settings_get_string (interface, "font-hinting");
+    g_autofree char *rgba_order = g_settings_get_string (interface, "font-rgba-order");
+    double scale = g_settings_get_double (interface, "text-scaling-factor");
+    g_autofree char *hintstyle = g_strconcat ("hint", hinting, NULL);
+    gboolean subpixel = g_str_equal (antialiasing, "rgba");
+
+    g_object_set (gtk,
+                  "gtk-xft-dpi", (int) (scale * 96 * 1024),
+                  "gtk-xft-antialias", g_str_equal (antialiasing, "none") ? 0 : 1,
+                  "gtk-xft-hinting", g_str_equal (hinting, "none") ? 0 : 1,
+                  "gtk-xft-hintstyle", hintstyle,
+                  "gtk-xft-rgba", subpixel && !g_str_equal (rgba_order, "rgba") ? rgba_order : "none",
+                  NULL);
+}
+
+static void
+host_settings_bind (GApplication *application)
+{
+    static GHashTable *cache = NULL;
+    GtkSettings *gtk = gtk_settings_get_default ();
+    GObjectClass *gtk_class;
+    GSettings *interface;
+
+    if (cache != NULL || gtk == NULL)
+    {
+        return;
+    }
+    cache = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, g_object_unref);
+    gtk_class = G_OBJECT_GET_CLASS (gtk);
+
+    for (gsize i = 0; i < G_N_ELEMENTS (host_settings); i++)
+    {
+        GSettings *settings = host_settings_get (cache, host_settings[i].schema, host_settings[i].key);
+
+        if (settings != NULL && g_object_class_find_property (gtk_class, host_settings[i].property) != NULL)
+        {
+            g_settings_bind (settings, host_settings[i].key,
+                             gtk, host_settings[i].property,
+                             G_SETTINGS_BIND_GET);
+        }
+    }
+
+    interface = host_settings_get (cache, "org.gnome.desktop.interface", "text-scaling-factor");
+    if (interface != NULL &&
+        host_settings_get (cache, "org.gnome.desktop.interface", "font-antialiasing") != NULL &&
+        host_settings_get (cache, "org.gnome.desktop.interface", "font-hinting") != NULL &&
+        host_settings_get (cache, "org.gnome.desktop.interface", "font-rgba-order") != NULL)
+    {
+        host_settings_update_fonts (interface);
+        g_signal_connect (interface, "changed::text-scaling-factor", G_CALLBACK (host_settings_update_fonts), NULL);
+        g_signal_connect (interface, "changed::font-antialiasing", G_CALLBACK (host_settings_update_fonts), NULL);
+        g_signal_connect (interface, "changed::font-hinting", G_CALLBACK (host_settings_update_fonts), NULL);
+        g_signal_connect (interface, "changed::font-rgba-order", G_CALLBACK (host_settings_update_fonts), NULL);
+    }
+}
+
 int
 main (int   argc,
       char *argv[])
@@ -88,6 +214,8 @@ main (int   argc,
     nautilus_register_resource ();
     /* Run the nautilus application. */
     application = nautilus_application_new ();
+    /* "startup" runs the class handler first, so GTK is initialized here. */
+    g_signal_connect (application, "startup", G_CALLBACK (host_settings_bind), NULL);
 
     /* hold indefinitely if we're asked to persist */
     if (g_getenv ("NAUTILUS_PERSIST") != NULL)
