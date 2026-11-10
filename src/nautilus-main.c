@@ -56,6 +56,27 @@ main (int   argc,
 
     g_set_prgname (APPLICATION_ID);
 
+    /* Mako can be the desktop portal's FileChooser backend. At login the
+     * portal starts Mako and waits for it, while GTK and libadwaita in Mako
+     * ask that same portal for appearance settings: each waits for the other
+     * until the 25 s D-Bus timeout, and every app asking the portal stalls
+     * with them. Read appearance from GSettings instead; on the host it is
+     * the same data. */
+    {
+        const char *gdk_debug = g_getenv ("GDK_DEBUG");
+
+        if (gdk_debug == NULL || *gdk_debug == '\0')
+        {
+            g_setenv ("GDK_DEBUG", "no-portals", TRUE);
+        }
+        else if (strstr (gdk_debug, "portals") == NULL)
+        {
+            g_autofree char *value = g_strconcat (gdk_debug, ",no-portals", NULL);
+            g_setenv ("GDK_DEBUG", value, TRUE);
+        }
+        g_setenv ("ADW_DISABLE_PORTAL", "1", FALSE);
+    }
+
     if (getuid () == 0)
     {
         g_warning (_("Running as root is not supported. "
