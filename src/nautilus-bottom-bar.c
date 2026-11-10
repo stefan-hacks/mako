@@ -387,6 +387,7 @@ build_views_popover (void)
     g_autoptr (GMenu) menu = g_menu_new ();
     g_autoptr (GMenu) views = g_menu_new ();
     g_autoptr (GMenu) zoom = g_menu_new ();
+    g_autoptr (GMenu) density = g_menu_new ();
     g_autoptr (GMenu) more = g_menu_new ();
     g_autoptr (GMenu) panels = g_menu_new ();
     g_autoptr (GMenuItem) item = NULL;
@@ -411,6 +412,12 @@ build_views_popover (void)
     g_menu_item_set_attribute (item, "display-hint", "s", "inline-buttons");
     g_menu_append_item (menu, item);
     g_clear_object (&item);
+
+    /* Same setting as Preferences → Organize → Density, for all windows. */
+    g_menu_append (density, _("Co_mfortable"), "bar.density('comfortable')");
+    g_menu_append (density, _("Com_pact"), "bar.density('compact')");
+    g_menu_append (density, _("_Dense"), "bar.density('dense')");
+    g_menu_append_section (menu, _("Density"), G_MENU_MODEL (density));
 
     append_item (more, _("_Flat View"), "win.flat-view");
     g_menu_append (more, _("_Visible Columns…"), "view.visible-columns");
@@ -515,6 +522,14 @@ nautilus_bottom_bar_init (NautilusBottomBar *self)
     gtk_box_append (GTK_BOX (self->box), self->views_button);
 
     self->filter = gtk_custom_filter_new (matches, self, NULL);
+
+    {
+        g_autoptr (GSimpleActionGroup) actions = g_simple_action_group_new ();
+        g_autoptr (GAction) density = g_settings_create_action (nautilus_flier_settings (), "density");
+
+        g_action_map_add_action (G_ACTION_MAP (actions), density);
+        gtk_widget_insert_action_group (GTK_WIDGET (self), "bar", G_ACTION_GROUP (actions));
+    }
 
     g_signal_connect_object (nautilus_flier_settings (), "changed::menu-shortcuts",
                              G_CALLBACK (on_menu_shortcuts), self, G_CONNECT_SWAPPED);

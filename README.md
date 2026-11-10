@@ -161,7 +161,8 @@ Most of what Mako adds can be switched in **Preferences →
 Organize**: the density (comfortable, compact or dense rows in the list,
 grid, columns and sidebar), ratings, tags, folder colors and their scheme, the built-in
 Quick Look, shortcut hints, keys in menus, sidebar groups and which
-sections and places the sidebar shows.
+sections and places the sidebar shows. The density is also in the bottom
+bar's View menu.
 
 The settings live in the GSettings schema `org.gnome.nautilus.flier`, so
 they never touch your normal Nautilus settings.

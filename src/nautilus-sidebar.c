@@ -1059,16 +1059,48 @@ add_color_swatches (GtkWidget *popover,
                                 nautilus_color_row_new ("row-color.set", FALSE), "sidebar-color");
 }
 
+static gboolean
+popup_when_built (gpointer data)
+{
+    GtkWidget *popover = data;
+
+    if (gtk_widget_get_parent (popover) != NULL)
+    {
+        gtk_popover_popup (GTK_POPOVER (popover));
+    }
+    g_object_unref (popover);
+    return G_SOURCE_REMOVE;
+}
+
+/* Pops @popover up at (@x, @y) in @parent: below the pointer in the upper
+ * half of @parent and above it in the lower half, as menus there do. */
+static void
+popup_at_point (GtkWidget *popover,
+                GtkWidget *parent,
+                double     x,
+                double     y)
+{
+    gtk_widget_set_parent (popover, parent);
+    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+    gtk_widget_set_halign (popover, GTK_ALIGN_START);
+    gtk_popover_set_position (GTK_POPOVER (popover),
+                              y > gtk_widget_get_height (parent) / 2 ? GTK_POS_TOP : GTK_POS_BOTTOM);
+    gtk_popover_set_pointing_to (GTK_POPOVER (popover), &(GdkRectangle) { (int) x, (int) y, 1, 1 });
+    g_signal_connect (popover, "closed", G_CALLBACK (unparent_popover_later), NULL);
+    /* A menu shows its section titles and separators from an idle, and
+     * popped up before that it is measured without them: too small, so
+     * it scrolls. */
+    g_idle_add_full (G_PRIORITY_DEFAULT_IDLE, popup_when_built, g_object_ref (popover), NULL);
+}
+
 /* Pops @popover up at (@x, @y) in @row, parented to the sidebar: rows get
  * rebuilt (a tag recolored, a group switched off) while their menu is
- * still open, and a popover must not go down with them. @group, if any,
- * is the row's "group" actions, given to the popover itself. */
+ * still open, and a popover must not go down with them. */
 static void
-popup_on_sidebar (GtkWidget    *popover,
-                  GtkWidget    *row,
-                  double        x,
-                  double        y,
-                  GActionGroup *group)
+popup_on_sidebar (GtkWidget *popover,
+                  GtkWidget *row,
+                  double     x,
+                  double     y)
 {
     GtkWidget *sidebar = gtk_widget_get_ancestor (row, NAUTILUS_TYPE_PLACES_SIDEBAR);
     graphene_point_t point = GRAPHENE_POINT_INIT (x, y);
@@ -1081,15 +1113,7 @@ popup_on_sidebar (GtkWidget    *popover,
     {
         point = GRAPHENE_POINT_INIT (0, 0);
     }
-    if (group != NULL)
-    {
-        gtk_widget_insert_action_group (popover, "group", group);
-    }
-    gtk_widget_set_parent (popover, sidebar);
-    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
-    gtk_popover_set_pointing_to (GTK_POPOVER (popover), &(GdkRectangle) { (int) point.x, (int) point.y, 1, 1 });
-    g_signal_connect (popover, "closed", G_CALLBACK (unparent_popover_later), NULL);
-    gtk_popover_popup (GTK_POPOVER (popover));
+    popup_at_point (popover, sidebar, point.x, point.y);
 }
 
 static void
@@ -1103,7 +1127,7 @@ show_tag_menu (GtkWidget *row,
     append_color_section (menu);
     popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
     add_color_swatches (popover, row);
-    popup_on_sidebar (popover, row, x, y, NULL);
+    popup_on_sidebar (popover, row, x, y);
 }
 
 static void
@@ -1128,8 +1152,9 @@ show_group_menu (GtkWidget *header,
     append_sections_section (menu);
 
     popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
+    gtk_widget_insert_action_group (popover, "group", G_ACTION_GROUP (group));
     add_color_swatches (popover, header);
-    popup_on_sidebar (popover, header, x, y, G_ACTION_GROUP (group));
+    popup_on_sidebar (popover, header, x, y);
 }
 
 static void
@@ -4383,6 +4408,10 @@ show_row_popover (NautilusSidebarRow *row,
     {
         gtk_popover_set_pointing_to (GTK_POPOVER (sidebar->popover),
                                      &(GdkRectangle){p_in_sidebar.x, p_in_sidebar.y, 0, 0});
+        /* Above the pointer low in the sidebar, as popup_at_point () does. */
+        gtk_popover_set_position (GTK_POPOVER (sidebar->popover),
+                                  p_in_sidebar.y > gtk_widget_get_height (GTK_WIDGET (sidebar)) / 2
+                                  ? GTK_POS_TOP : GTK_POS_BOTTOM);
     }
 
     gtk_popover_popup (GTK_POPOVER (sidebar->popover));
@@ -4842,11 +4871,7 @@ on_empty_area_pressed (GtkGestureClick *gesture,
     gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
     append_sections_section (menu);
     popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
-    gtk_widget_set_parent (popover, sidebar->swin);
-    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
-    gtk_popover_set_pointing_to (GTK_POPOVER (popover), &(GdkRectangle) { (int) x, (int) y, 1, 1 });
-    g_signal_connect (popover, "closed", G_CALLBACK (unparent_popover_later), NULL);
-    gtk_popover_popup (GTK_POPOVER (popover));
+    popup_at_point (popover, sidebar->swin, x, y);
 }
 
 static void

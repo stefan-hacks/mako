@@ -1683,11 +1683,31 @@ static char *capture_dir;
 static guint capture_frame;
 static gint64 capture_start;
 
-static void
-capture_to_png (NautilusWindow *window,
-                const char     *path)
+static GtkWidget *
+capture_find_popover (GtkWidget *widget)
 {
-    GtkWidget *widget = GTK_WIDGET (window);
+    if (GTK_IS_POPOVER (widget) && gtk_widget_get_mapped (widget))
+    {
+        return widget;
+    }
+    for (GtkWidget *child = gtk_widget_get_first_child (widget); child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        GtkWidget *found = capture_find_popover (child);
+
+        if (found != NULL)
+        {
+            return found;
+        }
+    }
+    return NULL;
+}
+
+static void
+capture_to_png (GtkWidget  *widget,
+                const char *path)
+{
+    GtkNative *window = GTK_NATIVE (widget);
     g_autoptr (GdkPaintable) paintable = gtk_widget_paintable_new (widget);
     g_autoptr (GtkSnapshot) snapshot = gtk_snapshot_new ();
     g_autoptr (GskRenderNode) node = NULL;
@@ -1695,7 +1715,7 @@ capture_to_png (NautilusWindow *window,
     int width = gtk_widget_get_width (widget), height = gtk_widget_get_height (widget);
     const char *scale_env = g_getenv ("FLIER_CAPTURE_SCALE");
     double scale = scale_env != NULL ? g_ascii_strtod (scale_env, NULL)
-                                     : gdk_surface_get_scale (gtk_native_get_surface (GTK_NATIVE (window)));
+                                     : gdk_surface_get_scale (gtk_native_get_surface (window));
 
     gtk_snapshot_scale (snapshot, scale, scale);
     gdk_paintable_snapshot (paintable, snapshot, width, height);
@@ -1704,7 +1724,7 @@ capture_to_png (NautilusWindow *window,
     {
         return;
     }
-    texture = gsk_renderer_render_texture (gtk_native_get_renderer (GTK_NATIVE (window)), node,
+    texture = gsk_renderer_render_texture (gtk_native_get_renderer (window), node,
                                            &GRAPHENE_RECT_INIT (0, 0, width * scale, height * scale));
     if (g_str_has_suffix (path, ".ppm"))
     {
@@ -1948,7 +1968,17 @@ action_flier_capture (GSimpleAction *action,
     }
     else if (g_str_has_prefix (command, "shot:"))
     {
-        capture_to_png (window, command + 5);
+        capture_to_png (GTK_WIDGET (window), command + 5);
+    }
+    else if (g_str_has_prefix (command, "popover:"))
+    {
+        /* The open menu, which has its own surface and isn't in "shot:". */
+        GtkWidget *popover = capture_find_popover (GTK_WIDGET (window));
+
+        if (popover != NULL)
+        {
+            capture_to_png (popover, command + 8);
+        }
     }
     else if (g_str_has_prefix (command, "rec:"))
     {
