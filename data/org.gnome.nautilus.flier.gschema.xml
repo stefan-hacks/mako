@@ -69,6 +69,12 @@
       <summary>Show the inspector</summary>
       <description>Show a panel with a preview and the details of the selected item.</description>
     </key>
+    <key type="i" name="columns-width">
+      <range min="0" max="2000"/>
+      <default>200</default>
+      <summary>Width of the columns in the columns view</summary>
+      <description>The width in pixels each column starts with. Alt+drag on a column edge sets it for all columns. 0 shares the window width equally between the columns.</description>
+    </key>
     <key type="b" name="tree-view">
       <default>false</default>
       <summary>Tree view for new tabs</summary>

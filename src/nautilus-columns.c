@@ -11,6 +11,12 @@
  * click goes into it or opens it. Left and Right in the list go up and
  * into the selected folder.
  *
+ * Column edges can be dragged: a plain drag sets that column's width (kept
+ * per depth for the tab), Alt+drag sets the width of every column (the
+ * columns-width setting). A double click on an edge resets that column,
+ * Alt+double click resets all of them. With columns-width at 0 the
+ * columns share the window width equally instead.
+ *
  * The side columns are light: a GtkDirectoryList each, with a few file
  * attributes, no thumbnails and no file monitoring beyond GIO's.
  *
@@ -36,6 +42,9 @@
 #include "nautilus-window-slot.h"
 
 #define COLUMN_WIDTH 220
+#define MIN_COLUMN 120
+#define MAX_HANDLES 32
+#define HANDLE_WIDTH 8
 #define INPUT_IS_OURS_US (1500 * G_TIME_SPAN_MILLISECOND)
 #define ATTRIBUTES G_FILE_ATTRIBUTE_STANDARD_NAME "," \
     G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME "," \
@@ -74,6 +83,16 @@ struct _NautilusColumns
     gboolean flat;
     double wheel_amount;
     gint64 wheel_quiet_until;
+
+    /* Column widths. column_width 0: share the width equally. */
+    int column_width;
+    GArray *depth_widths;       /* int per depth from the leftmost column; 0 = column_width */
+    GtkWidget *handles[MAX_HANDLES];
+    int used_width;             /* of all columns but the right one, as last laid out */
+    int drag_depth;
+    int drag_start;
+    int drag_max;
+    gboolean drag_all;
 };
 
 enum
@@ -1060,8 +1079,6 @@ on_any_press (NautilusColumns *self)
     self->last_input = g_get_monotonic_time ();
 }
 
-/* Like File Flier's: every column the same width, the oldest folders above
- * dropping off when they don't fit. */
 static void
 nautilus_columns_measure (GtkWidget      *widget,
                           GtkOrientation  orientation,
@@ -1095,6 +1112,37 @@ nautilus_columns_measure (GtkWidget      *widget,
     }
 }
 
+static int
+width_at (NautilusColumns *self,
+          guint            depth)
+{
+    int w = depth < self->depth_widths->len ? g_array_index (self->depth_widths, int, depth) : 0;
+
+    return w > 0 ? w : self->column_width;
+}
+
+static void
+place_handle (NautilusColumns *self,
+              guint           *n_handles,
+              int              x,
+              int              height,
+              guint            depth,
+              int              width)
+{
+    GtkWidget *handle;
+
+    if (*n_handles >= MAX_HANDLES)
+    {
+        return;
+    }
+    handle = self->handles[(*n_handles)++];
+    g_object_set_data (G_OBJECT (handle), "depth", GUINT_TO_POINTER (depth));
+    g_object_set_data (G_OBJECT (handle), "width", GINT_TO_POINTER (width));
+    gtk_widget_set_child_visible (handle, TRUE);
+    gtk_widget_size_allocate (handle,
+                              &(GtkAllocation) { x - HANDLE_WIDTH / 2, 0, HANDLE_WIDTH, height }, -1);
+}
+
 static void
 nautilus_columns_size_allocate (GtkWidget *widget,
                                 int        width,
@@ -1102,20 +1150,45 @@ nautilus_columns_size_allocate (GtkWidget *widget,
                                 int        baseline)
 {
     NautilusColumns *self = NAUTILUS_COLUMNS (widget);
+    gboolean equal = self->column_width <= 0;
+    gboolean has_content = self->content != NULL && gtk_widget_get_visible (self->content);
     int content_min = 0;
-    int fit = width / COLUMN_WIDTH;
+    int fit = width / (equal ? COLUMN_WIDTH : MIN_COLUMN);
     gboolean side = gtk_widget_get_visible (self->child_column) && fit >= 2;
     guint n_parents = self->parents->len;
-    guint n_left = side ? MIN (n_parents, (guint) fit - 2) : 0;
-    guint n = side ? n_left + 2 : 1;
-    guint k = 0;
+    guint n_left = 0;
+    guint n_handles = 0;
+    int content_w, child_w, used = 0, x = 0;
 
-    if (self->content != NULL && gtk_widget_get_visible (self->content))
+    if (has_content)
     {
         gtk_widget_measure (self->content, GTK_ORIENTATION_HORIZONTAL, -1, &content_min, NULL, NULL, NULL);
     }
 
-#define COL_X(k) ((int) ((double) width * (k) / n + 0.5))
+    if (!side)
+    {
+        content_w = width;
+    }
+    else if (equal)
+    {
+        /* Like File Flier's: every column the same width, the oldest
+         * folders above dropping off when they don't fit. */
+        n_left = MIN (n_parents, (guint) fit - 2);
+        content_w = MAX (width / (int) (n_left + 2), content_min);
+    }
+    else
+    {
+        content_w = CLAMP (MAX (width_at (self, n_parents), content_min), MIN (MIN_COLUMN, width - MIN_COLUMN),
+                           width - MIN_COLUMN);
+        used = content_w;
+        while (n_left < n_parents &&
+               used + width_at (self, n_parents - 1 - n_left) + MIN_COLUMN <= width)
+        {
+            used += width_at (self, n_parents - 1 - n_left);
+            n_left++;
+        }
+    }
+
     for (guint i = 0; i < n_parents; i++)
     {
         GtkWidget *box = g_ptr_array_index (self->parents, i);
@@ -1124,31 +1197,151 @@ nautilus_columns_size_allocate (GtkWidget *widget,
         gtk_widget_set_child_visible (box, shown);
         if (shown)
         {
-            gtk_widget_size_allocate (box, &(GtkAllocation) { COL_X (k), 0, COL_X (k + 1) - COL_X (k), height },
-                                      -1);
-            k++;
+            int w = equal ? width / (int) (n_left + 2) : width_at (self, i);
+
+            /* Equal widths: what the content column needs beyond its share
+             * comes off the columns on its left. */
+            if (equal && i == n_parents - n_left)
+            {
+                w = MAX (0, w - (content_w - width / (int) (n_left + 2)));
+            }
+            gtk_widget_size_allocate (box, &(GtkAllocation) { x, 0, w, height }, -1);
+            x += w;
+            place_handle (self, &n_handles, x, height, i, w);
         }
     }
 
-    if (self->content != NULL && gtk_widget_get_visible (self->content))
+    if (has_content)
     {
-        int x = COL_X (k), w = MAX (COL_X (k + 1) - x, content_min);
-
-        if (x + w > width && side)
+        content_w = MIN (content_w, width - x - (side ? MIN (MIN_COLUMN, width / 2) : 0));
+        gtk_widget_size_allocate (self->content, &(GtkAllocation) { x, 0, MAX (content_w, 0), height }, -1);
+        x += MAX (content_w, 0);
+        if (side)
         {
-            x = MAX (0, width - w - (COL_X (n) - COL_X (n - 1)));
+            place_handle (self, &n_handles, x, height, n_parents, content_w);
         }
-        gtk_widget_size_allocate (self->content, &(GtkAllocation) { x, 0, w, height }, -1);
-        k++;
     }
+    self->used_width = x;
 
     gtk_widget_set_child_visible (self->child_column, side);
     if (side)
     {
-        gtk_widget_size_allocate (self->child_column,
-                                  &(GtkAllocation) { COL_X (k), 0, width - COL_X (k), height }, -1);
+        child_w = equal ? width - x : MIN (width_at (self, n_parents + 1), width - x);
+        gtk_widget_size_allocate (self->child_column, &(GtkAllocation) { x, 0, child_w, height }, -1);
+        if (!equal && x + child_w + HANDLE_WIDTH / 2 <= width)
+        {
+            place_handle (self, &n_handles, x + child_w, height, n_parents + 1, child_w);
+        }
     }
-#undef COL_X
+
+    for (guint i = n_handles; i < MAX_HANDLES; i++)
+    {
+        gtk_widget_set_child_visible (self->handles[i], FALSE);
+    }
+}
+
+/* ------------------------------------------------------------ Resizing */
+
+static void
+on_handle_drag_begin (GtkGestureDrag *gesture,
+                      double          x,
+                      double          y,
+                      NautilusColumns *self)
+{
+    GtkWidget *handle = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+    GdkModifierType state = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (gesture));
+    int width = gtk_widget_get_width (GTK_WIDGET (self));
+    guint depth = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (handle), "depth"));
+
+    self->drag_depth = depth;
+    self->drag_start = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (handle), "width"));
+    self->drag_all = (state & GDK_ALT_MASK) != 0;
+    if (self->column_width <= 0)
+    {
+        /* Leave equal sharing: every column keeps the width it has now. */
+        self->column_width = self->drag_start;
+    }
+    /* The content column and one column on the right always stay. */
+    self->drag_max = self->drag_all ? width - MIN_COLUMN
+                     : depth > self->parents->len ? width - self->used_width
+                     : width - MIN_COLUMN - (self->used_width - self->drag_start);
+    self->drag_max = MAX (self->drag_max, MIN_COLUMN);
+}
+
+static void
+on_handle_drag_update (GtkGestureDrag *gesture,
+                       double          offset_x,
+                       double          offset_y,
+                       NautilusColumns *self)
+{
+    int w = CLAMP (self->drag_start + (int) offset_x, MIN_COLUMN, self->drag_max);
+
+    if (offset_x == 0)
+    {
+        return;
+    }
+    gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+
+    if (self->drag_all)
+    {
+        self->column_width = w;
+        g_array_set_size (self->depth_widths, 0);
+    }
+    else
+    {
+        if (self->depth_widths->len <= (guint) self->drag_depth)
+        {
+            g_array_set_size (self->depth_widths, self->drag_depth + 1);
+        }
+        g_array_index (self->depth_widths, int, self->drag_depth) = w;
+    }
+    gtk_widget_queue_allocate (GTK_WIDGET (self));
+}
+
+static void
+on_handle_drag_end (GtkGestureDrag *gesture,
+                    double          offset_x,
+                    double          offset_y,
+                    NautilusColumns *self)
+{
+    if (self->drag_all)
+    {
+        g_settings_set_int (nautilus_flier_settings (), "columns-width", self->column_width);
+    }
+}
+
+static void
+on_handle_pressed (GtkGestureClick *gesture,
+                   int              n_press,
+                   double           x,
+                   double           y,
+                   NautilusColumns *self)
+{
+    GtkWidget *handle = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+    GdkModifierType state = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (gesture));
+    guint depth = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (handle), "depth"));
+
+    if (n_press != 2)
+    {
+        return;
+    }
+    if (state & GDK_ALT_MASK)
+    {
+        g_settings_reset (nautilus_flier_settings (), "columns-width");
+    }
+    else if (depth < self->depth_widths->len)
+    {
+        g_array_index (self->depth_widths, int, depth) = 0;
+    }
+    gtk_widget_queue_allocate (GTK_WIDGET (self));
+}
+
+static void
+on_columns_width_changed (NautilusColumns *self)
+{
+    self->column_width = g_settings_get_int (nautilus_flier_settings (), "columns-width");
+    g_array_set_size (self->depth_widths, 0);
+    gtk_widget_queue_allocate (GTK_WIDGET (self));
 }
 
 static void
@@ -1170,6 +1363,33 @@ nautilus_columns_init (NautilusColumns *self)
     gtk_widget_add_css_class (self->child_column, "miller-child");
     gtk_widget_set_visible (self->child_column, FALSE);
     gtk_widget_set_parent (self->child_column, GTK_WIDGET (self));
+
+    /* Edge handles, after every column so they are on top. */
+    for (guint i = 0; i < MAX_HANDLES; i++)
+    {
+        GtkWidget *handle = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+        GtkGesture *gesture;
+
+        gtk_widget_add_css_class (handle, "miller-handle");
+        gtk_widget_set_cursor_from_name (handle, "col-resize");
+        gtk_widget_set_child_visible (handle, FALSE);
+        gtk_widget_set_parent (handle, GTK_WIDGET (self));
+
+        gesture = gtk_gesture_drag_new ();
+        g_signal_connect (gesture, "drag-begin", G_CALLBACK (on_handle_drag_begin), self);
+        g_signal_connect (gesture, "drag-update", G_CALLBACK (on_handle_drag_update), self);
+        g_signal_connect (gesture, "drag-end", G_CALLBACK (on_handle_drag_end), self);
+        gtk_widget_add_controller (handle, GTK_EVENT_CONTROLLER (gesture));
+
+        gesture = gtk_gesture_click_new ();
+        g_signal_connect (gesture, "pressed", G_CALLBACK (on_handle_pressed), self);
+        gtk_widget_add_controller (handle, GTK_EVENT_CONTROLLER (gesture));
+        self->handles[i] = handle;
+    }
+    self->depth_widths = g_array_new (FALSE, TRUE, sizeof (int));
+    self->column_width = g_settings_get_int (nautilus_flier_settings (), "columns-width");
+    g_signal_connect_object (nautilus_flier_settings (), "changed::columns-width",
+                             G_CALLBACK (on_columns_width_changed), self, G_CONNECT_SWAPPED);
 
     controller = gtk_event_controller_key_new ();
     gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_CAPTURE);
@@ -1228,6 +1448,7 @@ nautilus_columns_dispose (GObject *object)
     g_clear_object (&self->child_item);
     g_clear_object (&self->root);
     g_clear_pointer (&self->parents, g_ptr_array_unref);
+    g_clear_pointer (&self->depth_widths, g_array_unref);
     self->content = NULL;
     while ((child = gtk_widget_get_first_child (GTK_WIDGET (object))) != NULL)
     {

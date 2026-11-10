@@ -444,6 +444,8 @@ nautilus-columns .miller-column-title { padding: 8px 12px 4px 12px; opacity: 0.8
 nautilus-columns .miller-column { background: none; }
 nautilus-columns .miller-parent { border-right: 1px solid var(--border-color); }
 nautilus-columns .miller-child { border-left: 1px solid var(--border-color); background-color: var(--view-bg-color); }
+nautilus-columns { background-color: var(--view-bg-color); }
+nautilus-columns .miller-child { border-right: 1px solid var(--border-color); }
 nautilus-columns .miller-file-details label { margin-left: 12px; margin-right: 12px; }
 
 /* Quick Look, a card over the dimmed window. */
