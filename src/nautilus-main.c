@@ -44,7 +44,10 @@
 
 /* With portals off (see main), GTK on Wayland falls back to built-in
  * defaults (Adwaita icons, Sans 10) instead of the desktop's settings. Feed
- * GtkSettings from the same GSettings keys the GNOME portal serves. */
+ * GtkSettings from the same GSettings keys the GNOME portal serves.
+ * gtk-theme is left out on purpose: libadwaita sets its own empty theme,
+ * and loading the desktop's GTK theme (Yaru on Ubuntu) on top of it gives
+ * outlined header bar buttons, other sidebar colors and square corners. */
 static const struct
 {
     const char *schema;
@@ -52,7 +55,6 @@ static const struct
     const char *property;
 } host_settings[] =
 {
-    { "org.gnome.desktop.interface", "gtk-theme", "gtk-theme-name" },
     { "org.gnome.desktop.interface", "icon-theme", "gtk-icon-theme-name" },
     { "org.gnome.desktop.interface", "cursor-theme", "gtk-cursor-theme-name" },
     { "org.gnome.desktop.interface", "cursor-size", "gtk-cursor-theme-size" },
