@@ -46,7 +46,7 @@
 #define COLUMN_WIDTH 220
 #define MIN_COLUMN 120
 #define MAX_HANDLES 32
-#define HANDLE_WIDTH 8
+#define HANDLE_WIDTH 16
 #define INPUT_IS_OURS_US (1500 * G_TIME_SPAN_MILLISECOND)
 #define ATTRIBUTES G_FILE_ATTRIBUTE_STANDARD_NAME "," \
     G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME "," \
@@ -96,8 +96,8 @@ struct _NautilusColumns
     GFile *laid_root;           /* the root the strip was last laid out from */
     gboolean dragging;
     int drag_depth;
-    int drag_start;
-    int drag_max;
+    int drag_start;             /* the column's width when the drag began */
+    double drag_left;           /* the column's left edge then */
     gboolean drag_all;
 };
 
@@ -525,16 +525,12 @@ update_parents (NautilusColumns *self)
     g_autoptr (GFile) child = g_object_ref (location);
     GFile *parent;
     guint keep = 0;
-    double from = self->scroll;
-    gboolean same_root;
 
     if (self->shown_location != NULL && g_file_equal (self->shown_location, location))
     {
         return;
     }
     g_set_object (&self->shown_location, location);
-    same_root = self->laid_root != NULL && self->root != NULL && g_file_equal (self->laid_root, self->root);
-    g_set_object (&self->laid_root, self->root);
     {
         g_autofree char *title = column_title (location);
 
@@ -582,10 +578,6 @@ update_parents (NautilusColumns *self)
     }
     clear_parents (self, chain->len);
     gtk_widget_queue_allocate (GTK_WIDGET (self));
-    if (same_root)
-    {
-        slide_from (self, from);
-    }
 }
 
 static void
@@ -638,10 +630,24 @@ update (gpointer user_data)
         return G_SOURCE_REMOVE;
     }
 
+    double from = self->scroll;
+    gboolean same_root = self->laid_root != NULL && self->root != NULL &&
+                         g_file_equal (self->laid_root, self->root);
+
     gtk_widget_add_css_class (GTK_WIDGET (self), "columns-on");
     gtk_widget_set_visible (self->child_column, TRUE);
     update_parents (self);
     update_child (self);
+    g_set_object (&self->laid_root, self->root);
+    /* Within the same strip, slide; a new one starts where it belongs. */
+    if (same_root)
+    {
+        slide_from (self, from);
+    }
+    else
+    {
+        adw_animation_reset (self->scroll_animation);
+    }
 
     return G_SOURCE_REMOVE;
 }
@@ -1123,7 +1129,9 @@ compute_layout (NautilusColumns *self,
         l->child = MAX (MIN_COLUMN, width - l->content);
         l->content = MAX (0, MIN (l->content, width - l->child));
     }
-    l->total = l->content + l->child;
+    /* The right column only takes room while it lists a folder, so going
+     * into a folder doesn't slide the strip for an empty column. */
+    l->total = l->content + (self->child_shown != NULL ? l->child : 0);
     for (guint i = 0; i < n_parents; i++)
     {
         l->total += LAYOUT_WIDTH (self, l, i);
@@ -1141,16 +1149,11 @@ slide_target (NautilusColumns *self,
               int              width)
 {
     Layout l;
-    int need, edge = 0;
 
+    /* Only as far as needed, so the columns on the left stay in sight as
+     * long as possible. */
     compute_layout (self, width, &l);
-    need = l.total - width;
-    /* By whole columns, so none is cut in half at the left edge. */
-    for (guint i = 0; i < self->parents->len && edge < need; i++)
-    {
-        edge += LAYOUT_WIDTH (self, &l, i);
-    }
-    return MAX (0, edge);
+    return MAX (0, l.total - width);
 }
 
 static void
@@ -1297,52 +1300,91 @@ nautilus_columns_size_allocate (GtkWidget *widget,
 
 /* ------------------------------------------------------------ Resizing */
 
-static void
-on_handle_drag_begin (GtkGestureDrag *gesture,
-                      double          x,
-                      double          y,
-                      NautilusColumns *self)
+/* The gestures sit on the columns, not on the edge handles: a handle moves
+ * with its edge while it is dragged, so offsets measured on it would feed
+ * back into themselves and jitter. */
+static GtkWidget *
+handle_at (NautilusColumns *self,
+           double           x,
+           double           y)
 {
-    GtkWidget *handle = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
-    GdkModifierType state = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (gesture));
-    int width = gtk_widget_get_width (GTK_WIDGET (self));
-    guint depth = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (handle), "depth"));
+    GtkWidget *picked = gtk_widget_pick (GTK_WIDGET (self), x, y, GTK_PICK_DEFAULT);
 
-    self->drag_depth = depth;
+    for (guint i = 0; i < MAX_HANDLES; i++)
+    {
+        if (picked == self->handles[i])
+        {
+            return picked;
+        }
+    }
+    return NULL;
+}
+
+static void
+on_drag_begin (GtkGestureDrag  *gesture,
+               double           x,
+               double           y,
+               NautilusColumns *self)
+{
+    GtkWidget *handle = handle_at (self, x, y);
+    GdkModifierType state = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (gesture));
+    graphene_point_t edge;
+
+    if (handle == NULL ||
+        !gtk_widget_compute_point (handle, GTK_WIDGET (self), &GRAPHENE_POINT_INIT (HANDLE_WIDTH / 2, 0), &edge))
+    {
+        gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_DENIED);
+        return;
+    }
+
+    self->drag_depth = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (handle), "depth"));
     self->drag_start = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (handle), "width"));
     self->drag_all = (state & GDK_ALT_MASK) != 0;
+    self->drag_left = edge.x - self->drag_start;
     if (self->column_width <= 0)
     {
         /* Leave equal sharing: every column keeps the width it has now. */
         self->column_width = self->drag_start;
     }
-    /* The strip holds still while dragging, so the edge follows the
-     * pointer; it slides back into place when the drag ends. */
+    /* The strip holds still while dragging, so the edge stays under the
+     * pointer; it slides into place when the drag ends. */
     self->dragging = TRUE;
-    self->drag_max = MAX (width - MIN_COLUMN, MIN_COLUMN);
 }
 
 static void
-on_handle_drag_update (GtkGestureDrag *gesture,
-                       double          offset_x,
-                       double          offset_y,
-                       NautilusColumns *self)
+on_drag_update (GtkGestureDrag  *gesture,
+                double           offset_x,
+                double           offset_y,
+                NautilusColumns *self)
 {
-    int w = CLAMP (self->drag_start + (int) offset_x, MIN_COLUMN, self->drag_max);
+    int view = gtk_widget_get_width (GTK_WIDGET (self));
+    /* Where the edge goes: it keeps its distance to the pointer, so it
+     * doesn't jump when the press was a little off the line. */
+    double edge = CLAMP (self->drag_left + self->drag_start + offset_x, 0, view - HANDLE_WIDTH / 2);
+    int w;
 
-    if (offset_x == 0)
+    if (!self->dragging || offset_x == 0)
     {
         return;
     }
     gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    /* Alt can also come in once the drag is going. */
+    if (gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (gesture)) & GDK_ALT_MASK)
+    {
+        self->drag_all = TRUE;
+    }
 
     if (self->drag_all)
     {
-        self->column_width = w;
+        /* Every column from the leftmost one up to this edge has the new
+         * width, so the edge is (depth + 1) widths from the strip's start. */
+        w = (int) ((edge + self->scroll) / (self->drag_depth + 1) + 0.5);
+        self->column_width = MAX (w, MIN_COLUMN);
         g_array_set_size (self->depth_widths, 0);
     }
     else
     {
+        w = MAX ((int) (edge - self->drag_left + 0.5), MIN_COLUMN);
         if (self->depth_widths->len <= (guint) self->drag_depth)
         {
             g_array_set_size (self->depth_widths, self->drag_depth + 1);
@@ -1353,13 +1395,17 @@ on_handle_drag_update (GtkGestureDrag *gesture,
 }
 
 static void
-on_handle_drag_end (GtkGestureDrag *gesture,
-                    double          offset_x,
-                    double          offset_y,
-                    NautilusColumns *self)
+on_drag_end (GtkGestureDrag  *gesture,
+             double           offset_x,
+             double           offset_y,
+             NautilusColumns *self)
 {
+    if (!self->dragging)
+    {
+        return;
+    }
     self->dragging = FALSE;
-    if (self->drag_all)
+    if (self->drag_all && offset_x != 0)
     {
         g_settings_set_int (nautilus_flier_settings (), "columns-width", self->column_width);
     }
@@ -1367,20 +1413,21 @@ on_handle_drag_end (GtkGestureDrag *gesture,
 }
 
 static void
-on_handle_pressed (GtkGestureClick *gesture,
-                   int              n_press,
-                   double           x,
-                   double           y,
-                   NautilusColumns *self)
+on_edge_pressed (GtkGestureClick *gesture,
+                 int              n_press,
+                 double           x,
+                 double           y,
+                 NautilusColumns *self)
 {
-    GtkWidget *handle = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+    GtkWidget *handle = handle_at (self, x, y);
     GdkModifierType state = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (gesture));
-    guint depth = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (handle), "depth"));
+    guint depth;
 
-    if (n_press != 2)
+    if (handle == NULL || n_press != 2)
     {
         return;
     }
+    depth = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (handle), "depth"));
     if (state & GDK_ALT_MASK)
     {
         g_settings_reset (nautilus_flier_settings (), "columns-width");
@@ -1390,6 +1437,7 @@ on_handle_pressed (GtkGestureClick *gesture,
         g_array_index (self->depth_widths, int, depth) = 0;
     }
     gtk_widget_queue_allocate (GTK_WIDGET (self));
+    slide_from (self, self->scroll);
 }
 
 static void
@@ -1431,7 +1479,7 @@ nautilus_columns_init (NautilusColumns *self)
     gtk_widget_set_child_visible (self->content_title, FALSE);
     gtk_widget_set_parent (self->content_title, GTK_WIDGET (self));
 
-    self->scroll_animation = adw_timed_animation_new (GTK_WIDGET (self), 0, 0, 220,
+    self->scroll_animation = adw_timed_animation_new (GTK_WIDGET (self), 0, 0, 120,
                                                       adw_callback_animation_target_new ((AdwAnimationTargetFunc) on_slide,
                                                                                          self, NULL));
     adw_timed_animation_set_easing (ADW_TIMED_ANIMATION (self->scroll_animation), ADW_EASE_OUT_CUBIC);
@@ -1440,24 +1488,23 @@ nautilus_columns_init (NautilusColumns *self)
     for (guint i = 0; i < MAX_HANDLES; i++)
     {
         GtkWidget *handle = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-        GtkGesture *gesture;
 
         gtk_widget_add_css_class (handle, "miller-handle");
         gtk_widget_set_cursor_from_name (handle, "col-resize");
         gtk_widget_set_child_visible (handle, FALSE);
         gtk_widget_set_parent (handle, GTK_WIDGET (self));
-
-        gesture = gtk_gesture_drag_new ();
-        g_signal_connect (gesture, "drag-begin", G_CALLBACK (on_handle_drag_begin), self);
-        g_signal_connect (gesture, "drag-update", G_CALLBACK (on_handle_drag_update), self);
-        g_signal_connect (gesture, "drag-end", G_CALLBACK (on_handle_drag_end), self);
-        gtk_widget_add_controller (handle, GTK_EVENT_CONTROLLER (gesture));
-
-        gesture = gtk_gesture_click_new ();
-        g_signal_connect (gesture, "pressed", G_CALLBACK (on_handle_pressed), self);
-        gtk_widget_add_controller (handle, GTK_EVENT_CONTROLLER (gesture));
         self->handles[i] = handle;
     }
+    controller = GTK_EVENT_CONTROLLER (gtk_gesture_drag_new ());
+    gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_CAPTURE);
+    g_signal_connect (controller, "drag-begin", G_CALLBACK (on_drag_begin), self);
+    g_signal_connect (controller, "drag-update", G_CALLBACK (on_drag_update), self);
+    g_signal_connect (controller, "drag-end", G_CALLBACK (on_drag_end), self);
+    gtk_widget_add_controller (GTK_WIDGET (self), controller);
+    controller = GTK_EVENT_CONTROLLER (gtk_gesture_click_new ());
+    gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_CAPTURE);
+    g_signal_connect (controller, "pressed", G_CALLBACK (on_edge_pressed), self);
+    gtk_widget_add_controller (GTK_WIDGET (self), controller);
     self->depth_widths = g_array_new (FALSE, TRUE, sizeof (int));
     self->column_width = g_settings_get_int (nautilus_flier_settings (), "columns-width");
     g_signal_connect_object (nautilus_flier_settings (), "changed::columns-width",
