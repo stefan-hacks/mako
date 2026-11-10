@@ -567,6 +567,100 @@ group_hidden (NautilusSidebarSectionType section)
     return id != NULL && g_strv_contains ((const char * const *) hidden, id);
 }
 
+/* "sections.ID": one boolean action per group, true while it is shown, so
+ * the right-click menus can switch groups on and off. */
+static void
+on_section_toggled (GSimpleAction *action,
+                    GVariant      *state,
+                    gpointer       user_data)
+{
+    GSettings *flier = nautilus_flier_settings ();
+    g_auto (GStrv) hidden = g_settings_get_strv (flier, "sidebar-hidden-groups");
+    g_autoptr (GStrvBuilder) builder = g_strv_builder_new ();
+    const char *id = g_action_get_name (G_ACTION (action));
+
+    for (guint i = 0; hidden[i] != NULL; i++)
+    {
+        if (!g_str_equal (hidden[i], id))
+        {
+            g_strv_builder_add (builder, hidden[i]);
+        }
+    }
+    if (!g_variant_get_boolean (state))
+    {
+        g_strv_builder_add (builder, id);
+    }
+
+    g_auto (GStrv) result = g_strv_builder_end (builder);
+    g_settings_set_strv (flier, "sidebar-hidden-groups", (const char * const *) result);
+}
+
+static void
+sync_section_actions (GActionMap *map)
+{
+    for (guint g = 0; g < G_N_ELEMENTS (all_groups); g++)
+    {
+        GAction *action = g_action_map_lookup_action (map, group_id (all_groups[g]));
+
+        if (action != NULL)
+        {
+            g_simple_action_set_state (G_SIMPLE_ACTION (action),
+                                       g_variant_new_boolean (!group_hidden (all_groups[g])));
+        }
+    }
+}
+
+static void
+install_section_actions (GtkWidget *sidebar)
+{
+    g_autoptr (GSimpleActionGroup) group = g_simple_action_group_new ();
+
+    for (guint g = 0; g < G_N_ELEMENTS (all_groups); g++)
+    {
+        g_autoptr (GSimpleAction) action = g_simple_action_new_stateful (group_id (all_groups[g]), NULL,
+                                                                         g_variant_new_boolean (TRUE));
+
+        g_signal_connect (action, "change-state", G_CALLBACK (on_section_toggled), NULL);
+        g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (action));
+    }
+    sync_section_actions (G_ACTION_MAP (group));
+    g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-hidden-groups",
+                             G_CALLBACK (sync_section_actions), group, G_CONNECT_SWAPPED);
+    gtk_widget_insert_action_group (sidebar, "sections", G_ACTION_GROUP (group));
+}
+
+/* The groups as check items, in the sidebar's order. */
+static GMenu *
+sections_menu_new (void)
+{
+    GMenu *menu = g_menu_new ();
+    g_autoptr (GPtrArray) ids = group_order ();
+
+    for (guint i = 0; i < ids->len; i++)
+    {
+        for (guint g = 0; g < G_N_ELEMENTS (all_groups); g++)
+        {
+            if (g_str_equal (group_id (all_groups[g]), g_ptr_array_index (ids, i)))
+            {
+                g_autofree char *action = g_strdup_printf ("sections.%s", group_id (all_groups[g]));
+
+                g_menu_append (menu, all_groups[g] == NAUTILUS_SIDEBAR_SECTION_RECENT ? _("Recent Folders")
+                                                                                       : group_title (all_groups[g]),
+                               action);
+            }
+        }
+    }
+    return menu;
+}
+
+static void
+append_sections_section (GMenu *menu)
+{
+    g_autoptr (GMenu) sections = sections_menu_new ();
+
+    g_menu_append_section (menu, _("Show in Sidebar"), G_MENU_MODEL (sections));
+}
+
 static gboolean path_is_home_dir (const char *path);
 
 static gboolean
@@ -965,6 +1059,39 @@ add_color_swatches (GtkWidget *popover,
                                 nautilus_color_row_new ("row-color.set", FALSE), "sidebar-color");
 }
 
+/* Pops @popover up at (@x, @y) in @row, parented to the sidebar: rows get
+ * rebuilt (a tag recolored, a group switched off) while their menu is
+ * still open, and a popover must not go down with them. @group, if any,
+ * is the row's "group" actions, given to the popover itself. */
+static void
+popup_on_sidebar (GtkWidget    *popover,
+                  GtkWidget    *row,
+                  double        x,
+                  double        y,
+                  GActionGroup *group)
+{
+    GtkWidget *sidebar = gtk_widget_get_ancestor (row, NAUTILUS_TYPE_PLACES_SIDEBAR);
+    graphene_point_t point = GRAPHENE_POINT_INIT (x, y);
+
+    if (sidebar == NULL)
+    {
+        sidebar = row;
+    }
+    if (sidebar != row && !gtk_widget_compute_point (row, sidebar, &GRAPHENE_POINT_INIT (x, y), &point))
+    {
+        point = GRAPHENE_POINT_INIT (0, 0);
+    }
+    if (group != NULL)
+    {
+        gtk_widget_insert_action_group (popover, "group", group);
+    }
+    gtk_widget_set_parent (popover, sidebar);
+    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+    gtk_popover_set_pointing_to (GTK_POPOVER (popover), &(GdkRectangle) { (int) point.x, (int) point.y, 1, 1 });
+    g_signal_connect (popover, "closed", G_CALLBACK (unparent_popover_later), NULL);
+    gtk_popover_popup (GTK_POPOVER (popover));
+}
+
 static void
 show_tag_menu (GtkWidget *row,
                double     x,
@@ -976,11 +1103,7 @@ show_tag_menu (GtkWidget *row,
     append_color_section (menu);
     popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
     add_color_swatches (popover, row);
-    gtk_widget_set_parent (popover, row);
-    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
-    gtk_popover_set_pointing_to (GTK_POPOVER (popover), &(GdkRectangle) { (int) x, (int) y, 1, 1 });
-    g_signal_connect (popover, "closed", G_CALLBACK (unparent_popover_later), NULL);
-    gtk_popover_popup (GTK_POPOVER (popover));
+    popup_on_sidebar (popover, row, x, y, NULL);
 }
 
 static void
@@ -1002,14 +1125,11 @@ show_group_menu (GtkWidget *header,
     g_menu_append (menu, _("Move _Up"), "group.up");
     g_menu_append (menu, _("Move _Down"), "group.down");
     append_color_section (menu);
+    append_sections_section (menu);
 
     popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
     add_color_swatches (popover, header);
-    gtk_widget_set_parent (popover, header);
-    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
-    gtk_popover_set_pointing_to (GTK_POPOVER (popover), &(GdkRectangle) { (int) x, (int) y, 1, 1 });
-    g_signal_connect (popover, "closed", G_CALLBACK (unparent_popover_later), NULL);
-    gtk_popover_popup (GTK_POPOVER (popover));
+    popup_on_sidebar (popover, header, x, y, G_ACTION_GROUP (group));
 }
 
 static void
@@ -4219,6 +4339,13 @@ create_row_popover (NautilusSidebar    *sidebar,
     }
 
     append_color_section (menu);
+    {
+        g_autoptr (GMenu) sections = sections_menu_new ();
+        g_autoptr (GMenu) last = g_menu_new ();
+
+        g_menu_append_submenu (last, _("Sidebar _Sections"), G_MENU_MODEL (sections));
+        g_menu_append_section (menu, NULL, G_MENU_MODEL (last));
+    }
     sidebar->popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
     g_object_unref (menu);
     gtk_widget_set_parent (sidebar->popover, GTK_WIDGET (sidebar));
@@ -4695,6 +4822,33 @@ update_location (NautilusSidebar *self)
     nautilus_sidebar_set_location (self, location);
 }
 
+/* A right click where there is no row: which groups to show. */
+static void
+on_empty_area_pressed (GtkGestureClick *gesture,
+                       int              n_press,
+                       double           x,
+                       double           y,
+                       NautilusSidebar *sidebar)
+{
+    graphene_point_t point;
+    g_autoptr (GMenu) menu = g_menu_new ();
+    GtkWidget *popover;
+
+    if (!gtk_widget_compute_point (sidebar->swin, sidebar->list_box, &GRAPHENE_POINT_INIT (x, y), &point) ||
+        (point.y >= 0 && gtk_list_box_get_row_at_y (GTK_LIST_BOX (sidebar->list_box), (int) point.y) != NULL))
+    {
+        return;
+    }
+    gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    append_sections_section (menu);
+    popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (menu));
+    gtk_widget_set_parent (popover, sidebar->swin);
+    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+    gtk_popover_set_pointing_to (GTK_POPOVER (popover), &(GdkRectangle) { (int) x, (int) y, 1, 1 });
+    g_signal_connect (popover, "closed", G_CALLBACK (unparent_popover_later), NULL);
+    gtk_popover_popup (GTK_POPOVER (popover));
+}
+
 static void
 nautilus_sidebar_init (NautilusSidebar *sidebar)
 {
@@ -4731,6 +4885,8 @@ nautilus_sidebar_init (NautilusSidebar *sidebar)
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (sidebar->swin),
                                     GTK_POLICY_NEVER,
                                     GTK_POLICY_AUTOMATIC);
+
+    install_section_actions (GTK_WIDGET (sidebar));
 
     /* list box */
     sidebar->list_box = gtk_list_box_new ();
@@ -4789,6 +4945,13 @@ nautilus_sidebar_init (NautilusSidebar *sidebar)
     sidebar->dragging_over = FALSE;
 
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (sidebar->swin), sidebar->list_box);
+    {
+        GtkGesture *empty_click = gtk_gesture_click_new ();
+
+        gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (empty_click), GDK_BUTTON_SECONDARY);
+        g_signal_connect (empty_click, "pressed", G_CALLBACK (on_empty_area_pressed), sidebar);
+        gtk_widget_add_controller (sidebar->swin, GTK_EVENT_CONTROLLER (empty_click));
+    }
 
     sidebar->hostname = g_strdup (_("Device"));
     sidebar->hostnamed_cancellable = g_cancellable_new ();

@@ -92,9 +92,10 @@ the panel.
 ## Sidebar
 
 The sidebar is made of groups you can fold. Drag a group's header (or
-right-click it) to move it, and switch groups and single places on or off
-in Preferences. Downloads, Documents, Pictures and Videos sit in Places.
-Right-click any item to color its icon.
+right-click it) to move it. Right-click anywhere in the sidebar to switch
+groups on or off; single places switch in Preferences. Downloads,
+Documents, Pictures and Videos sit in Places. Right-click any item to
+color its icon.
 
 Walk the sidebar from the keyboard with `Ctrl+↑` and `Ctrl+↓`. Group
 headers are stops too, so this works even when every group is folded.
