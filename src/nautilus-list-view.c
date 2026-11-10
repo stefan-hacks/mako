@@ -326,12 +326,19 @@ update_columns_settings_from_metadata_and_preferences (NautilusListView *self)
     g_auto (GStrv) column_order = nautilus_column_get_column_order (file);
     g_auto (GStrv) visible_columns = nautilus_column_get_visible_columns (file);
     GtkWidget *columns = gtk_widget_get_ancestor (GTK_WIDGET (self), NAUTILUS_TYPE_COLUMNS);
+    gboolean names_only = columns != NULL && nautilus_columns_get_names_only (NAUTILUS_COLUMNS (columns));
+    GtkWidget *header = gtk_widget_get_first_child (GTK_WIDGET (self->view_ui));
 
-    /* In Columns mode the list is one column among others: names only. */
-    if (columns != NULL && nautilus_columns_get_names_only (NAUTILUS_COLUMNS (columns)))
+    /* In Columns mode the list is one column among others: names only,
+     * and no header (the columns show the folder's name above it). */
+    if (names_only)
     {
         g_strfreev (visible_columns);
         visible_columns = g_strsplit ("name", ",", -1);
+    }
+    if (header != NULL)
+    {
+        gtk_widget_set_visible (header, !names_only);
     }
 
     apply_columns_settings (self, column_order, visible_columns);

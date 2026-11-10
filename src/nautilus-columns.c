@@ -4,9 +4,11 @@
  * Laid out like File Flier's: the folder being looked at stays the real
  * list view, with everything it can do, as the middle column. To its left
  * are the folders above it, each with the way down highlighted; to its
- * right, what's inside the selected folder, or details of the selected
- * file. All columns share the width equally; when they no longer fit, the
- * oldest folders above drop off. Clicking an item in a side column shows
+ * right, what's inside the selected folder. The columns sit on one strip
+ * that starts at the leftmost folder; when it is wider than the view, it
+ * slides left (animated, like Finder) so the right end stays in sight.
+ * All columns look alike, so going into a folder reads as the selection
+ * moving one column on. Clicking an item in a side column shows
  * it (its folder becomes the middle column, with it selected); a double
  * click goes into it or opens it. Left and Right in the list go up and
  * into the selected folder.
@@ -88,7 +90,11 @@ struct _NautilusColumns
     int column_width;
     GArray *depth_widths;       /* int per depth from the leftmost column; 0 = column_width */
     GtkWidget *handles[MAX_HANDLES];
-    int used_width;             /* of all columns but the right one, as last laid out */
+    GtkWidget *content_title;   /* the middle column's folder name */
+    double scroll;              /* how far the strip is slid left */
+    AdwAnimation *scroll_animation;
+    GFile *laid_root;           /* the root the strip was last laid out from */
+    gboolean dragging;
     int drag_depth;
     int drag_start;
     int drag_max;
@@ -104,6 +110,8 @@ enum
 };
 
 static GParamSpec *properties[N_PROPS];
+
+static void slide_from (NautilusColumns *self, double from);
 
 G_DEFINE_TYPE (NautilusColumns, nautilus_columns, GTK_TYPE_WIDGET)
 
@@ -193,17 +201,14 @@ setup_row (GtkSignalListItemFactory *factory,
     Column *column = user_data;
     GtkWidget *icon = gtk_image_new ();
     GtkWidget *label = gtk_label_new (NULL);
-    GtkWidget *arrow = gtk_image_new_from_icon_name ("go-next-symbolic");
 
     gtk_image_set_pixel_size (GTK_IMAGE (icon), column->icon_size);
 
     gtk_label_set_xalign (GTK_LABEL (label), 0);
     gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_MIDDLE);
     gtk_widget_set_hexpand (label, TRUE);
-    gtk_widget_add_css_class (arrow, "dim-label");
     gtk_box_append (GTK_BOX (box), icon);
     gtk_box_append (GTK_BOX (box), label);
-    gtk_box_append (GTK_BOX (box), arrow);
     gtk_list_item_set_child (item, box);
 
     GtkGesture *click = gtk_gesture_click_new ();
@@ -222,7 +227,6 @@ bind_row (GtkSignalListItemFactory *factory,
     GtkWidget *box = gtk_list_item_get_child (item);
     GtkWidget *icon = gtk_widget_get_first_child (box);
     GtkWidget *label = gtk_widget_get_next_sibling (icon);
-    GtkWidget *arrow = gtk_widget_get_next_sibling (label);
 
     Column *column = user_data;
     GIcon *gicon = g_file_info_get_icon (info);
@@ -247,7 +251,6 @@ bind_row (GtkSignalListItemFactory *factory,
     }
     gtk_image_set_from_paintable (GTK_IMAGE (icon), paintable);
     gtk_label_set_text (GTK_LABEL (label), g_file_info_get_display_name (info));
-    gtk_widget_set_visible (arrow, g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY);
 }
 
 /* Shows the item: its folder becomes the middle column, with it selected. */
@@ -414,6 +417,19 @@ list_icon_size (NautilusColumns *self)
     }
 }
 
+static char *
+column_title (GFile *directory)
+{
+    g_autofree char *basename = g_file_get_basename (directory);
+    g_autoptr (GFile) home = g_file_new_for_path (g_get_home_dir ());
+
+    if (g_file_equal (directory, home))
+    {
+        return g_strdup (_("Home"));
+    }
+    return g_strdup (basename != NULL && g_utf8_validate (basename, -1, NULL) ? basename : "?");
+}
+
 static GtkWidget *
 column_new (NautilusColumns *self,
             GFile           *directory,
@@ -428,9 +444,8 @@ column_new (NautilusColumns *self,
     GtkWidget *view;
     GtkWidget *scroller = gtk_scrolled_window_new ();
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    GtkWidget *title = gtk_label_new (NULL);
-    g_autofree char *basename = g_file_get_basename (directory);
-    g_autoptr (GFile) home = g_file_new_for_path (g_get_home_dir ());
+    g_autofree char *title_text = column_title (directory);
+    GtkWidget *title = gtk_label_new (title_text);
 
     column->columns = self;
     column->directory = g_object_ref (directory);
@@ -456,8 +471,6 @@ column_new (NautilusColumns *self,
     gtk_widget_add_css_class (view, "navigation-sidebar");
     gtk_widget_add_css_class (view, "miller-column");
 
-    gtk_label_set_text (GTK_LABEL (title), g_file_equal (directory, home) ? _("Home")
-                                           : g_utf8_validate (basename, -1, NULL) ? basename : "?");
     gtk_label_set_ellipsize (GTK_LABEL (title), PANGO_ELLIPSIZE_MIDDLE);
     gtk_label_set_xalign (GTK_LABEL (title), 0);
     gtk_widget_add_css_class (title, "heading");
@@ -512,12 +525,21 @@ update_parents (NautilusColumns *self)
     g_autoptr (GFile) child = g_object_ref (location);
     GFile *parent;
     guint keep = 0;
+    double from = self->scroll;
+    gboolean same_root;
 
     if (self->shown_location != NULL && g_file_equal (self->shown_location, location))
     {
         return;
     }
     g_set_object (&self->shown_location, location);
+    same_root = self->laid_root != NULL && self->root != NULL && g_file_equal (self->laid_root, self->root);
+    g_set_object (&self->laid_root, self->root);
+    {
+        g_autofree char *title = column_title (location);
+
+        gtk_label_set_text (GTK_LABEL (self->content_title), title);
+    }
 
     /* Up to the leftmost column's folder. */
     while (self->root != NULL && !g_file_equal (child, self->root) &&
@@ -560,57 +582,10 @@ update_parents (NautilusColumns *self)
     }
     clear_parents (self, chain->len);
     gtk_widget_queue_allocate (GTK_WIDGET (self));
-}
-
-/* The right column for a file: what it is. */
-static GtkWidget *
-file_details_new (NautilusColumns *self,
-                  NautilusFile    *file)
-{
-    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-    GtkWidget *image = gtk_image_new ();
-    GtkWidget *name = gtk_label_new (nautilus_file_get_display_name (file));
-    g_autoptr (GdkPaintable) paintable = nautilus_file_get_icon_paintable (file, 96,
-                                                                           gtk_widget_get_scale_factor (GTK_WIDGET (self)),
-                                                                           NAUTILUS_FILE_ICON_FLAGS_USE_THUMBNAILS);
-    const char *attributes[] = { "type", "size", "date_modified" };
-
-    gtk_widget_add_css_class (box, "miller-file-details");
-    gtk_image_set_from_paintable (GTK_IMAGE (image), paintable);
-    gtk_image_set_pixel_size (GTK_IMAGE (image), 96);
-    gtk_widget_set_margin_top (image, 36);
-    gtk_widget_set_margin_bottom (image, 12);
-    gtk_box_append (GTK_BOX (box), image);
-
-    gtk_label_set_wrap (GTK_LABEL (name), TRUE);
-    gtk_label_set_wrap_mode (GTK_LABEL (name), PANGO_WRAP_WORD_CHAR);
-    gtk_label_set_justify (GTK_LABEL (name), GTK_JUSTIFY_CENTER);
-    gtk_label_set_lines (GTK_LABEL (name), 3);
-    gtk_label_set_ellipsize (GTK_LABEL (name), PANGO_ELLIPSIZE_MIDDLE);
-    gtk_widget_add_css_class (name, "heading");
-    gtk_widget_set_margin_start (name, 12);
-    gtk_widget_set_margin_end (name, 12);
-    gtk_widget_set_margin_bottom (name, 6);
-    gtk_box_append (GTK_BOX (box), name);
-
-    for (guint i = 0; i < G_N_ELEMENTS (attributes); i++)
+    if (same_root)
     {
-        g_autofree char *value = nautilus_file_get_string_attribute (file, attributes[i]);
-        g_autofree char *text = NULL;
-        GtkWidget *label;
-
-        if (value == NULL || value[0] == '\0')
-        {
-            continue;
-        }
-        text = i == 2 ? g_strdup_printf (_("Modified %s"), value) : g_strdup (value);
-        label = gtk_label_new (text);
-        gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
-        gtk_widget_add_css_class (label, "dim-label");
-        gtk_box_append (GTK_BOX (box), label);
+        slide_from (self, from);
     }
-
-    return box;
 }
 
 static void
@@ -641,13 +616,6 @@ update_child (NautilusColumns *self)
         gtk_widget_set_hexpand (column, TRUE);
         gtk_box_append (GTK_BOX (self->child_column), column);
     }
-    else if (file != NULL)
-    {
-        GtkWidget *details = file_details_new (self, file);
-
-        gtk_widget_set_hexpand (details, TRUE);
-        gtk_box_append (GTK_BOX (self->child_column), details);
-    }
 }
 
 static gboolean
@@ -659,6 +627,7 @@ update (gpointer user_data)
 
     if (!columns_on (self))
     {
+        gtk_widget_remove_css_class (GTK_WIDGET (self), "columns-on");
         gtk_widget_set_visible (self->child_column, FALSE);
         g_clear_object (&self->shown_location);
         g_clear_object (&self->child_shown);
@@ -669,6 +638,7 @@ update (gpointer user_data)
         return G_SOURCE_REMOVE;
     }
 
+    gtk_widget_add_css_class (GTK_WIDGET (self), "columns-on");
     gtk_widget_set_visible (self->child_column, TRUE);
     update_parents (self);
     update_child (self);
@@ -1121,17 +1091,112 @@ width_at (NautilusColumns *self,
     return w > 0 ? w : self->column_width;
 }
 
+/* The strip of columns for a view this wide: every column's width (equal,
+ * or each depth's own), and how far it has to slide left to show its end. */
+typedef struct
+{
+    int equal;      /* the width of every column, or 0 for each depth's own */
+    int content;
+    int child;
+    int total;
+} Layout;
+
+#define LAYOUT_WIDTH(self, l, depth) ((l)->equal > 0 ? (l)->equal : width_at ((self), (depth)))
+
+static void
+compute_layout (NautilusColumns *self,
+                int              width,
+                Layout          *l)
+{
+    guint n_parents = self->parents->len;
+    int content_min = 0;
+
+    if (self->content != NULL && gtk_widget_get_visible (self->content))
+    {
+        gtk_widget_measure (self->content, GTK_ORIENTATION_HORIZONTAL, -1, &content_min, NULL, NULL, NULL);
+    }
+    l->equal = self->column_width > 0 ? 0 : MAX (COLUMN_WIDTH, width / (int) (n_parents + 2));
+    l->content = MAX (LAYOUT_WIDTH (self, l, n_parents), content_min);
+    l->child = LAYOUT_WIDTH (self, l, n_parents + 1);
+    if (l->content + l->child > width)
+    {
+        l->child = MAX (MIN_COLUMN, width - l->content);
+        l->content = MAX (0, MIN (l->content, width - l->child));
+    }
+    l->total = l->content + l->child;
+    for (guint i = 0; i < n_parents; i++)
+    {
+        l->total += LAYOUT_WIDTH (self, l, i);
+    }
+    /* Equal widths fill the view. */
+    if (l->equal > 0 && l->total < width)
+    {
+        l->child += width - l->total;
+        l->total = width;
+    }
+}
+
+static double
+slide_target (NautilusColumns *self,
+              int              width)
+{
+    Layout l;
+    int need, edge = 0;
+
+    compute_layout (self, width, &l);
+    need = l.total - width;
+    /* By whole columns, so none is cut in half at the left edge. */
+    for (guint i = 0; i < self->parents->len && edge < need; i++)
+    {
+        edge += LAYOUT_WIDTH (self, &l, i);
+    }
+    return MAX (0, edge);
+}
+
+static void
+on_slide (double           value,
+          NautilusColumns *self)
+{
+    self->scroll = value;
+    gtk_widget_queue_allocate (GTK_WIDGET (self));
+}
+
+/* Slides the strip from where it was to where it now has to be. */
+static void
+slide_from (NautilusColumns *self,
+            double           from)
+{
+    int width = gtk_widget_get_width (GTK_WIDGET (self));
+    double to;
+
+    if (width <= 0 || !gtk_widget_get_mapped (GTK_WIDGET (self)))
+    {
+        return;
+    }
+    to = slide_target (self, width);
+    if (G_APPROX_VALUE (from, to, 0.5))
+    {
+        return;
+    }
+    adw_animation_reset (self->scroll_animation);
+    adw_timed_animation_set_value_from (ADW_TIMED_ANIMATION (self->scroll_animation), from);
+    adw_timed_animation_set_value_to (ADW_TIMED_ANIMATION (self->scroll_animation), to);
+    self->scroll = from;
+    adw_animation_play (self->scroll_animation);
+}
+
 static void
 place_handle (NautilusColumns *self,
               guint           *n_handles,
               int              x,
+              int              width_of_view,
               int              height,
               guint            depth,
               int              width)
 {
     GtkWidget *handle;
 
-    if (*n_handles >= MAX_HANDLES)
+    if (*n_handles >= MAX_HANDLES || x <= 0 || x + HANDLE_WIDTH / 2 > width_of_view)
     {
         return;
     }
@@ -1144,94 +1209,84 @@ place_handle (NautilusColumns *self,
 }
 
 static void
+place (GtkWidget *widget,
+       int        x,
+       int        y,
+       int        w,
+       int        h,
+       int        width_of_view)
+{
+    gboolean shown = w > 0 && x + w > 0 && x < width_of_view;
+
+    gtk_widget_set_child_visible (widget, shown);
+    if (shown)
+    {
+        gtk_widget_size_allocate (widget, &(GtkAllocation) { x, y, w, h }, -1);
+    }
+}
+
+static void
 nautilus_columns_size_allocate (GtkWidget *widget,
                                 int        width,
                                 int        height,
                                 int        baseline)
 {
     NautilusColumns *self = NAUTILUS_COLUMNS (widget);
-    gboolean equal = self->column_width <= 0;
     gboolean has_content = self->content != NULL && gtk_widget_get_visible (self->content);
-    int content_min = 0;
-    int fit = width / (equal ? COLUMN_WIDTH : MIN_COLUMN);
-    gboolean side = gtk_widget_get_visible (self->child_column) && fit >= 2;
+    gboolean side = gtk_widget_get_visible (self->child_column) && width >= 2 * MIN_COLUMN;
     guint n_parents = self->parents->len;
-    guint n_left = 0;
     guint n_handles = 0;
-    int content_w, child_w, used = 0, x = 0;
-
-    if (has_content)
-    {
-        gtk_widget_measure (self->content, GTK_ORIENTATION_HORIZONTAL, -1, &content_min, NULL, NULL, NULL);
-    }
+    Layout l;
+    int x, title_h = 0;
 
     if (!side)
     {
-        content_w = width;
-    }
-    else if (equal)
-    {
-        /* Like File Flier's: every column the same width, the oldest
-         * folders above dropping off when they don't fit. */
-        n_left = MIN (n_parents, (guint) fit - 2);
-        content_w = MAX (width / (int) (n_left + 2), content_min);
-    }
-    else
-    {
-        content_w = CLAMP (MAX (width_at (self, n_parents), content_min), MIN (MIN_COLUMN, width - MIN_COLUMN),
-                           width - MIN_COLUMN);
-        used = content_w;
-        while (n_left < n_parents &&
-               used + width_at (self, n_parents - 1 - n_left) + MIN_COLUMN <= width)
+        for (guint i = 0; i < n_parents; i++)
         {
-            used += width_at (self, n_parents - 1 - n_left);
-            n_left++;
+            gtk_widget_set_child_visible (g_ptr_array_index (self->parents, i), FALSE);
         }
+        gtk_widget_set_child_visible (self->content_title, FALSE);
+        gtk_widget_set_child_visible (self->child_column, FALSE);
+        if (has_content)
+        {
+            gtk_widget_size_allocate (self->content, &(GtkAllocation) { 0, 0, width, height }, -1);
+        }
+        for (guint i = 0; i < MAX_HANDLES; i++)
+        {
+            gtk_widget_set_child_visible (self->handles[i], FALSE);
+        }
+        return;
     }
+
+    compute_layout (self, width, &l);
+    if (!self->dragging && adw_animation_get_state (self->scroll_animation) != ADW_ANIMATION_PLAYING)
+    {
+        self->scroll = slide_target (self, width);
+    }
+    x = - (int) (self->scroll + 0.5);
 
     for (guint i = 0; i < n_parents; i++)
     {
-        GtkWidget *box = g_ptr_array_index (self->parents, i);
-        gboolean shown = i >= n_parents - n_left;
+        int w = LAYOUT_WIDTH (self, &l, i);
 
-        gtk_widget_set_child_visible (box, shown);
-        if (shown)
-        {
-            int w = equal ? width / (int) (n_left + 2) : width_at (self, i);
-
-            /* Equal widths: what the content column needs beyond its share
-             * comes off the columns on its left. */
-            if (equal && i == n_parents - n_left)
-            {
-                w = MAX (0, w - (content_w - width / (int) (n_left + 2)));
-            }
-            gtk_widget_size_allocate (box, &(GtkAllocation) { x, 0, w, height }, -1);
-            x += w;
-            place_handle (self, &n_handles, x, height, i, w);
-        }
+        place (g_ptr_array_index (self->parents, i), x, 0, w, height, width);
+        x += w;
+        place_handle (self, &n_handles, x, width, height, i, w);
     }
 
+    gtk_widget_measure (self->content_title, GTK_ORIENTATION_VERTICAL, l.content, NULL, &title_h, NULL, NULL);
+    place (self->content_title, x, 0, l.content, title_h, width);
     if (has_content)
     {
-        content_w = MIN (content_w, width - x - (side ? MIN (MIN_COLUMN, width / 2) : 0));
-        gtk_widget_size_allocate (self->content, &(GtkAllocation) { x, 0, MAX (content_w, 0), height }, -1);
-        x += MAX (content_w, 0);
-        if (side)
-        {
-            place_handle (self, &n_handles, x, height, n_parents, content_w);
-        }
+        place (self->content, x, title_h, l.content, height - title_h, width);
     }
-    self->used_width = x;
+    x += l.content;
+    place_handle (self, &n_handles, x, width, height, n_parents, l.content);
 
-    gtk_widget_set_child_visible (self->child_column, side);
-    if (side)
+    place (self->child_column, x, 0, l.child, height, width);
+    if (l.equal == 0)
     {
-        child_w = equal ? width - x : MIN (width_at (self, n_parents + 1), width - x);
-        gtk_widget_size_allocate (self->child_column, &(GtkAllocation) { x, 0, child_w, height }, -1);
-        if (!equal && x + child_w + HANDLE_WIDTH / 2 <= width)
-        {
-            place_handle (self, &n_handles, x + child_w, height, n_parents + 1, child_w);
-        }
+        place_handle (self, &n_handles, x + l.child, width, height, n_parents + 1, l.child);
     }
 
     for (guint i = n_handles; i < MAX_HANDLES; i++)
@@ -1261,11 +1316,10 @@ on_handle_drag_begin (GtkGestureDrag *gesture,
         /* Leave equal sharing: every column keeps the width it has now. */
         self->column_width = self->drag_start;
     }
-    /* The content column and one column on the right always stay. */
-    self->drag_max = self->drag_all ? width - MIN_COLUMN
-                     : depth > self->parents->len ? width - self->used_width
-                     : width - MIN_COLUMN - (self->used_width - self->drag_start);
-    self->drag_max = MAX (self->drag_max, MIN_COLUMN);
+    /* The strip holds still while dragging, so the edge follows the
+     * pointer; it slides back into place when the drag ends. */
+    self->dragging = TRUE;
+    self->drag_max = MAX (width - MIN_COLUMN, MIN_COLUMN);
 }
 
 static void
@@ -1304,10 +1358,12 @@ on_handle_drag_end (GtkGestureDrag *gesture,
                     double          offset_y,
                     NautilusColumns *self)
 {
+    self->dragging = FALSE;
     if (self->drag_all)
     {
         g_settings_set_int (nautilus_flier_settings (), "columns-width", self->column_width);
     }
+    slide_from (self, self->scroll);
 }
 
 static void
@@ -1350,6 +1406,8 @@ nautilus_columns_init (NautilusColumns *self)
     GtkEventController *controller;
 
     gtk_widget_add_css_class (GTK_WIDGET (self), "miller-columns");
+    /* The strip slides left past the edge; don't draw it there. */
+    gtk_widget_set_overflow (GTK_WIDGET (self), GTK_OVERFLOW_HIDDEN);
 
     self->parents = g_ptr_array_new ();
 
@@ -1363,6 +1421,20 @@ nautilus_columns_init (NautilusColumns *self)
     gtk_widget_add_css_class (self->child_column, "miller-child");
     gtk_widget_set_visible (self->child_column, FALSE);
     gtk_widget_set_parent (self->child_column, GTK_WIDGET (self));
+
+    self->content_title = gtk_label_new (NULL);
+    gtk_label_set_xalign (GTK_LABEL (self->content_title), 0);
+    gtk_label_set_ellipsize (GTK_LABEL (self->content_title), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_widget_add_css_class (self->content_title, "heading");
+    gtk_widget_add_css_class (self->content_title, "miller-column-title");
+    gtk_widget_add_css_class (self->content_title, "miller-content-title");
+    gtk_widget_set_child_visible (self->content_title, FALSE);
+    gtk_widget_set_parent (self->content_title, GTK_WIDGET (self));
+
+    self->scroll_animation = adw_timed_animation_new (GTK_WIDGET (self), 0, 0, 220,
+                                                      adw_callback_animation_target_new ((AdwAnimationTargetFunc) on_slide,
+                                                                                         self, NULL));
+    adw_timed_animation_set_easing (ADW_TIMED_ANIMATION (self->scroll_animation), ADW_EASE_OUT_CUBIC);
 
     /* Edge handles, after every column so they are on top. */
     for (guint i = 0; i < MAX_HANDLES; i++)
@@ -1447,6 +1519,8 @@ nautilus_columns_dispose (GObject *object)
     g_clear_object (&self->child_shown);
     g_clear_object (&self->child_item);
     g_clear_object (&self->root);
+    g_clear_object (&self->laid_root);
+    g_clear_object (&self->scroll_animation);
     g_clear_pointer (&self->parents, g_ptr_array_unref);
     g_clear_pointer (&self->depth_widths, g_array_unref);
     self->content = NULL;

@@ -446,7 +446,15 @@ nautilus-columns .miller-parent { border-right: 1px solid var(--border-color); }
 nautilus-columns .miller-child { border-left: 1px solid var(--border-color); background-color: var(--view-bg-color); }
 nautilus-columns { background-color: var(--view-bg-color); }
 nautilus-columns .miller-child { border-right: 1px solid var(--border-color); }
-nautilus-columns .miller-file-details label { margin-left: 12px; margin-right: 12px; }
+nautilus-columns .miller-content-title { background-color: var(--view-bg-color); }
+/* The middle column is the real list view; in columns mode its rows look
+ * like the side columns' (navigation-sidebar), so moving on doesn't jump. */
+nautilus-columns.columns-on .nautilus-list-view columnview { padding-left: 6px; padding-right: 6px; }
+nautilus-columns.columns-on .nautilus-list-view columnview > listview {
+  padding-top: 6px; padding-bottom: 6px; border-spacing: 2px; margin-left: -6px; margin-right: -6px;
+}
+nautilus-columns.columns-on .nautilus-list-view columnview > listview > row { margin-left: 6px; margin-right: 6px; border-radius: 6px; }
+nautilus-columns.columns-on .nautilus-list-view .nautilus-view-cell { padding: 2px 8px; }
 
 /* Quick Look, a card over the dimmed window. */
 nautilus-quick-look, .quick-look { background-color: alpha(black, 0.32); }

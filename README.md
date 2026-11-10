@@ -56,9 +56,10 @@ to rate.
 
 ![Switching views and panels with Alt keys](docs/media/keys.gif)
 
-**Miller columns** work like Finder's. The right column shows the selected
-folder's contents or the selected file's details. One click reveals an
-item, a double click goes into it. Drag a column's edge to resize it, or
+**Miller columns** work like Finder's. The right column shows what's in
+the selected folder, and when the columns no longer fit, they slide left
+one column at a time. One click reveals an item, a double click goes into
+it. Drag a column's edge to resize it, or
 hold `Alt` while dragging to resize all columns at once. A double click on
 an edge resets that column, and `Alt` + double click resets them all.
 
