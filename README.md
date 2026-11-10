@@ -1,4 +1,4 @@
-<img src="docs/media/mako.png" width="96" align="right" alt="">
+<img src="docs/media/mako.png" width="64" align="right" alt="">
 
 # Mako
 
