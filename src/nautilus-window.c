@@ -3239,6 +3239,26 @@ on_window_active_changed (GtkWindow *window)
     }
 }
 
+/* Density: a style class on the window, so every view in it follows. */
+static void
+update_density (NautilusWindow *window)
+{
+    static const char *classes[] = { NULL, "density-compact", "density-dense" };
+    int density = g_settings_get_enum (nautilus_flier_settings (), "density");
+
+    for (guint i = 1; i < G_N_ELEMENTS (classes); i++)
+    {
+        if ((int) i == density)
+        {
+            gtk_widget_add_css_class (GTK_WIDGET (window), classes[i]);
+        }
+        else
+        {
+            gtk_widget_remove_css_class (GTK_WIDGET (window), classes[i]);
+        }
+    }
+}
+
 static void
 nautilus_window_init (NautilusWindow *window)
 {
@@ -3307,6 +3327,10 @@ nautilus_window_init (NautilusWindow *window)
     nautilus_quick_look_attach (ADW_APPLICATION_WINDOW (window));
     nautilus_shortcuts_attach (GTK_WINDOW (window));
     setup_inspector (window);
+
+    update_density (window);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::density",
+                             G_CALLBACK (update_density), window, G_CONNECT_SWAPPED);
 }
 
 static void

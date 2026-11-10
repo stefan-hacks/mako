@@ -593,6 +593,7 @@ nautilus_labels_preferences_page_new (void)
     GtkWidget *group, *row, *colors_switch;
     g_autoptr (GSimpleActionGroup) actions = g_simple_action_group_new ();
     g_autoptr (GAction) scheme_action = g_settings_create_action (settings, "folder-color-scheme");
+    g_autoptr (GAction) density_action = g_settings_create_action (settings, "density");
     GtkWidget *first_check = NULL;
     static const char *scheme_nicks[] = { "pastel", "vibrant", "earth", "ocean", "mono" };
 
@@ -600,7 +601,53 @@ nautilus_labels_preferences_page_new (void)
     adw_preferences_page_set_icon_name (ADW_PREFERENCES_PAGE (page), "starred-symbolic");
 
     g_action_map_add_action (G_ACTION_MAP (actions), scheme_action);
+    g_action_map_add_action (G_ACTION_MAP (actions), density_action);
     gtk_widget_insert_action_group (page, "flier", G_ACTION_GROUP (actions));
+
+    /* Density */
+    {
+        static const struct
+        {
+            const char *nick;
+            const char *title;
+            const char *subtitle;
+        } densities[] =
+        {
+            { "comfortable", N_("_Comfortable"), N_("As in GNOME Files") },
+            { "compact", N_("C_ompact"), N_("Less room around rows and items") },
+            { "dense", N_("_Dense"), N_("As many rows as fit") },
+        };
+        GtkWidget *first = NULL;
+
+        group = adw_preferences_group_new ();
+        adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (group), _("Density"));
+        adw_preferences_group_set_description (ADW_PREFERENCES_GROUP (group),
+                                               _("The list, grid, columns and sidebar. Icon sizes follow the zoom."));
+        for (guint i = 0; i < G_N_ELEMENTS (densities); i++)
+        {
+            GtkWidget *check = gtk_check_button_new ();
+            g_autofree char *action = g_strdup_printf ("flier.density('%s')", densities[i].nick);
+
+            row = adw_action_row_new ();
+            adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), _(densities[i].title));
+            adw_preferences_row_set_use_underline (ADW_PREFERENCES_ROW (row), TRUE);
+            adw_action_row_set_subtitle (ADW_ACTION_ROW (row), _(densities[i].subtitle));
+            gtk_widget_set_valign (check, GTK_ALIGN_CENTER);
+            gtk_actionable_set_detailed_action_name (GTK_ACTIONABLE (check), action);
+            if (first != NULL)
+            {
+                gtk_check_button_set_group (GTK_CHECK_BUTTON (check), GTK_CHECK_BUTTON (first));
+            }
+            else
+            {
+                first = check;
+            }
+            adw_action_row_add_prefix (ADW_ACTION_ROW (row), check);
+            adw_action_row_set_activatable_widget (ADW_ACTION_ROW (row), check);
+            adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), row);
+        }
+        adw_preferences_page_add (ADW_PREFERENCES_PAGE (page), ADW_PREFERENCES_GROUP (group));
+    }
 
     /* Ratings and tags */
     group = adw_preferences_group_new ();

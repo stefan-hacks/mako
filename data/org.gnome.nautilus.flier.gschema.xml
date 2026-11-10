@@ -8,6 +8,11 @@
     <value value="4" nick="mono"/>
   </enum>
 
+  <enum id="org.gnome.nautilus.flier.Density">
+    <value nick="comfortable" value="0"/>
+    <value nick="compact" value="1"/>
+    <value nick="dense" value="2"/>
+  </enum>
   <enum id="org.gnome.nautilus.flier.InspectorSide">
     <value value="0" nick="right"/>
     <value value="1" nick="left"/>
@@ -19,6 +24,11 @@
   <!-- Settings for the features carried over from File Flier. Kept apart from
        org.gnome.nautilus.preferences so that schema stays as upstream has it. -->
   <schema path="/org/gnome/nautilus/flier/" id="org.gnome.nautilus.flier" gettext-domain="nautilus">
+    <key name="density" enum="org.gnome.nautilus.flier.Density">
+      <default>'comfortable'</default>
+      <summary>Density</summary>
+      <description>How much room rows and items get in the list, grid, columns and sidebar: “comfortable” as GNOME Files has it, “compact” or “dense”. Icon sizes stay as the zoom sets them.</description>
+    </key>
     <key name="folder-color-scheme" enum="org.gnome.nautilus.flier.FolderColorScheme">
       <default>'pastel'</default>
       <summary>Folder color scheme</summary>
