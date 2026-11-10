@@ -150,9 +150,22 @@ nautilus_flier_settings (void)
 guint
 nautilus_density_icon_size (guint size)
 {
-    if (g_settings_get_enum (nautilus_flier_settings (), "density") == 3)
+    /* The standard icon sizes, which GNOME Files' zoom levels also use. */
+    static const guint sizes[] = { 16, 24, 32, 48, 64, 96, 128, 192, 256 };
+    /* How many sizes down: comfortable, compact, dense, extra-dense. */
+    static const guint steps[] = { 0, 1, 1, 2 };
+    guint density = g_settings_get_enum (nautilus_flier_settings (), "density");
+    guint down = density < G_N_ELEMENTS (steps) ? steps[density] : 0;
+
+    for (guint i = 0; i < down; i++)
     {
-        return MAX (16, size * 3 / 4);
+        guint smaller = sizes[0];
+
+        for (guint j = 0; j < G_N_ELEMENTS (sizes) && sizes[j] < size; j++)
+        {
+            smaller = sizes[j];
+        }
+        size = smaller;
     }
     return size;
 }

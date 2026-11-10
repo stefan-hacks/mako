@@ -3269,22 +3269,31 @@ on_window_active_changed (GtkWindow *window)
     }
 }
 
-/* Density: a style class on the window, so every view in it follows. */
+/* Density: a style class on the window, so every view in it follows;
+ * "density" for the files, "sidebar-density" for the sidebar. */
 static void
 update_density (NautilusWindow *window)
 {
-    static const char *classes[] = { NULL, "density-compact", "density-dense", "density-extra-dense" };
-    int density = g_settings_get_enum (nautilus_flier_settings (), "density");
+    static const char *nicks[] = { NULL, "compact", "dense", "extra-dense" };
+    static const char *keys[] = { "density", "sidebar-density" };
+    static const char *prefixes[] = { "density-", "sidebar-density-" };
 
-    for (guint i = 1; i < G_N_ELEMENTS (classes); i++)
+    for (guint k = 0; k < G_N_ELEMENTS (keys); k++)
     {
-        if ((int) i == density)
+        int density = g_settings_get_enum (nautilus_flier_settings (), keys[k]);
+
+        for (guint i = 1; i < G_N_ELEMENTS (nicks); i++)
         {
-            gtk_widget_add_css_class (GTK_WIDGET (window), classes[i]);
-        }
-        else
-        {
-            gtk_widget_remove_css_class (GTK_WIDGET (window), classes[i]);
+            g_autofree char *class = g_strconcat (prefixes[k], nicks[i], NULL);
+
+            if ((int) i == density)
+            {
+                gtk_widget_add_css_class (GTK_WIDGET (window), class);
+            }
+            else
+            {
+                gtk_widget_remove_css_class (GTK_WIDGET (window), class);
+            }
         }
     }
 }
@@ -3360,6 +3369,8 @@ nautilus_window_init (NautilusWindow *window)
 
     update_density (window);
     g_signal_connect_object (nautilus_flier_settings (), "changed::density",
+                             G_CALLBACK (update_density), window, G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-density",
                              G_CALLBACK (update_density), window, G_CONNECT_SWAPPED);
 }
 

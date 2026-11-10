@@ -459,6 +459,9 @@ nautilus-columns.columns-on .nautilus-list-view columnview > listview {
 }
 nautilus-columns.columns-on .nautilus-list-view columnview > listview > row { margin-left: 6px; margin-right: 6px; border-radius: 6px; }
 nautilus-columns.columns-on .nautilus-list-view .nautilus-view-cell { padding: 2px 8px; }
+/* The side columns' rows are as tall as their icon plus the padding of
+ * those cells, so they match the middle column at every zoom and density. */
+nautilus-columns .miller-column > row { min-height: 0; border-width: 0; padding-top: 2px; padding-bottom: 2px; margin-bottom: 2px; }
 
 /* Quick Look, a card over the dimmed window. */
 nautilus-quick-look, .quick-look { background-color: alpha(black, 0.32); }
@@ -495,41 +498,44 @@ nautilus-bottom-bar > .toolbar { padding: 4px 6px; }
 }
 .navigation-sidebar.sidebar-grouped row:not(.sidebar-group-header) > revealer > box { margin-left: 12px; }
 
-/* Density (Preferences → Organize). Only spacing changes; icon sizes stay
- * with the zoom, except in extra-dense (nautilus_density_icon_size ()). In the columns, the side columns (navigation-sidebar
- * rows) and the middle one (list view cells) are kept the same height at
- * every density, so a folder looks the same in both. */
-window.density-compact .nautilus-list-view columnview > listview { border-spacing: 4px; }
-window.density-compact .nautilus-list-view .nautilus-view-cell { padding-top: 3px; padding-bottom: 3px; }
-window.density-compact .nautilus-list-view.compact columnview > listview { border-spacing: 2px; }
+/* Density (Preferences → Organize). Two settings: "density" for the
+ * files (window.density-*) and "sidebar-density" for the sidebar
+ * (window.sidebar-density-*). Comfortable is GNOME Files as it is. The
+ * steps follow what GNOME Files does between its list zoom levels (icon,
+ * padding and spacing shrink together; its small zoom has 3px padding and
+ * 4px spacing): the icons go down the standard sizes
+ * (nautilus_density_icon_size ()) and the room around them with them. */
+window.density-compact .nautilus-list-view columnview > listview { border-spacing: 6px; }
+window.density-compact .nautilus-list-view .nautilus-view-cell { padding-top: 4px; padding-bottom: 4px; }
+window.density-compact .nautilus-list-view.compact columnview > listview { border-spacing: 3px; }
 window.density-compact .nautilus-list-view.compact .nautilus-view-cell { padding-top: 2px; padding-bottom: 2px; }
-window.density-dense .nautilus-list-view columnview > listview { border-spacing: 1px; }
-window.density-dense .nautilus-list-view .nautilus-view-cell { padding-top: 1px; padding-bottom: 1px; }
-window.density-dense .nautilus-list-view.compact columnview > listview { border-spacing: 0; }
+window.density-dense .nautilus-list-view columnview > listview { border-spacing: 3px; }
+window.density-dense .nautilus-list-view .nautilus-view-cell { padding-top: 2px; padding-bottom: 2px; }
+window.density-dense .nautilus-list-view.compact columnview > listview { border-spacing: 2px; }
 window.density-dense .nautilus-list-view.compact .nautilus-view-cell { padding-top: 1px; padding-bottom: 1px; }
+window.density-extra-dense .nautilus-list-view columnview > listview { border-spacing: 0; }
+window.density-extra-dense .nautilus-list-view .nautilus-view-cell { padding-top: 1px; padding-bottom: 1px; }
+window.density-extra-dense .nautilus-list-view.compact .nautilus-view-cell { padding-top: 0; padding-bottom: 0; }
 
 window.density-compact .nautilus-grid-view gridview { padding: 14px; border-spacing: 4px; }
 window.density-compact .nautilus-grid-view .nautilus-view-cell { padding: 4px; }
 window.density-dense .nautilus-grid-view gridview { padding: 10px; border-spacing: 2px; }
-window.density-dense .nautilus-grid-view .nautilus-view-cell { padding: 2px; }
-
-window.density-compact .navigation-sidebar > row { min-height: 30px; }
-window.density-dense .navigation-sidebar > row { min-height: 26px; margin-bottom: 1px; }
-
-window.density-compact nautilus-columns.columns-on .nautilus-list-view columnview > listview { border-spacing: 2px; }
-window.density-compact nautilus-columns.columns-on .nautilus-list-view .nautilus-view-cell { padding: 0 8px; }
-window.density-compact nautilus-columns .miller-column > row { min-height: 32px; margin-bottom: 2px; }
-window.density-dense nautilus-columns.columns-on .nautilus-list-view columnview > listview { border-spacing: 0; }
-window.density-dense nautilus-columns.columns-on .nautilus-list-view .nautilus-view-cell { padding: 0 8px; }
-window.density-dense nautilus-columns .miller-column > row { min-height: 32px; margin-bottom: 0; }
-
-/* Extra dense: no room left between rows, and smaller icons. */
-window.density-extra-dense .nautilus-list-view columnview > listview { border-spacing: 0; }
-window.density-extra-dense .nautilus-list-view columnview > listview > row { min-height: 0; }
-window.density-extra-dense .nautilus-list-view .nautilus-view-cell { padding-top: 0; padding-bottom: 0; }
+window.density-dense .nautilus-grid-view .nautilus-view-cell { padding: 3px; }
 window.density-extra-dense .nautilus-grid-view gridview { padding: 6px; border-spacing: 0; }
-window.density-extra-dense .nautilus-grid-view .nautilus-view-cell { padding: 1px; }
-window.density-extra-dense .navigation-sidebar > row { min-height: 22px; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
+window.density-extra-dense .nautilus-grid-view .nautilus-view-cell { padding: 2px; }
+
+/* Columns: the middle column's cells and the side columns' rows together. */
+window.density-compact nautilus-columns.columns-on .nautilus-list-view columnview > listview { border-spacing: 2px; }
+window.density-compact nautilus-columns.columns-on .nautilus-list-view .nautilus-view-cell { padding: 1px 8px; }
+window.density-compact nautilus-columns .miller-column > row { padding-top: 1px; padding-bottom: 1px; margin-bottom: 2px; }
+window.density-dense nautilus-columns.columns-on .nautilus-list-view columnview > listview { border-spacing: 0; }
+window.density-dense nautilus-columns.columns-on .nautilus-list-view .nautilus-view-cell { padding: 1px 8px; }
+window.density-dense nautilus-columns .miller-column > row { padding-top: 1px; padding-bottom: 1px; margin-bottom: 0; }
 window.density-extra-dense nautilus-columns.columns-on .nautilus-list-view columnview > listview { border-spacing: 0; }
 window.density-extra-dense nautilus-columns.columns-on .nautilus-list-view .nautilus-view-cell { padding: 0 8px; }
-window.density-extra-dense nautilus-columns .miller-column > row { min-height: 24px; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
+window.density-extra-dense nautilus-columns .miller-column > row { padding-top: 0; padding-bottom: 0; margin-bottom: 0; }
+
+/* The sidebar, on its own setting. */
+window.sidebar-density-compact placessidebar .navigation-sidebar > row { min-height: 30px; }
+window.sidebar-density-dense placessidebar .navigation-sidebar > row { min-height: 26px; margin-bottom: 1px; }
+window.sidebar-density-extra-dense placessidebar .navigation-sidebar > row { min-height: 22px; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }

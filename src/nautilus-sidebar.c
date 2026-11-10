@@ -624,6 +624,11 @@ install_section_actions (GtkWidget *sidebar)
         g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (action));
     }
     sync_section_actions (G_ACTION_MAP (group));
+    {
+        g_autoptr (GAction) density = g_settings_create_action (nautilus_flier_settings (), "sidebar-density");
+
+        g_action_map_add_action (G_ACTION_MAP (group), density);
+    }
     g_signal_connect_object (nautilus_flier_settings (), "changed::sidebar-hidden-groups",
                              G_CALLBACK (sync_section_actions), group, G_CONNECT_SWAPPED);
     gtk_widget_insert_action_group (sidebar, "sections", G_ACTION_GROUP (group));
@@ -657,8 +662,16 @@ static void
 append_sections_section (GMenu *menu)
 {
     g_autoptr (GMenu) sections = sections_menu_new ();
+    g_autoptr (GMenu) density = g_menu_new ();
+    g_autoptr (GMenu) last = g_menu_new ();
 
     g_menu_append_section (menu, _("Show in Sidebar"), G_MENU_MODEL (sections));
+    g_menu_append (density, _("Comfortable"), "sections.sidebar-density('comfortable')");
+    g_menu_append (density, _("Compact"), "sections.sidebar-density('compact')");
+    g_menu_append (density, _("Dense"), "sections.sidebar-density('dense')");
+    g_menu_append (density, _("Extra Dense"), "sections.sidebar-density('extra-dense')");
+    g_menu_append_submenu (last, _("Sidebar _Density"), G_MENU_MODEL (density));
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (last));
 }
 
 static gboolean path_is_home_dir (const char *path);

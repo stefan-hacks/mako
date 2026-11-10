@@ -580,6 +580,26 @@ group_switch_new (const char *title,
 }
 
 static void
+on_sidebar_density_selected (AdwComboRow *row)
+{
+    GSettings *settings = nautilus_flier_settings ();
+    guint selected = adw_combo_row_get_selected (row);
+
+    if (selected != GTK_INVALID_LIST_POSITION && (int) selected != g_settings_get_enum (settings, "sidebar-density"))
+    {
+        g_settings_set_enum (settings, "sidebar-density", selected);
+    }
+}
+
+static void
+on_sidebar_density_changed (GSettings   *settings,
+                            const char  *key,
+                            AdwComboRow *row)
+{
+    adw_combo_row_set_selected (row, g_settings_get_enum (settings, key));
+}
+
+static void
 on_manage_tags (AdwActionRow *row)
 {
     nautilus_tags_dialog_present (NULL, GTK_WIDGET (row));
@@ -614,16 +634,16 @@ nautilus_labels_preferences_page_new (void)
         } densities[] =
         {
             { "comfortable", N_("_Comfortable"), N_("As in GNOME Files") },
-            { "compact", N_("C_ompact"), N_("Less room around rows and items") },
-            { "dense", N_("_Dense"), N_("Rows close together") },
-            { "extra-dense", N_("_Extra Dense"), N_("As many rows as fit, with smaller icons") },
+            { "compact", N_("C_ompact"), N_("Less room around rows and items, smaller icons") },
+            { "dense", N_("_Dense"), N_("Rows close together, smaller icons") },
+            { "extra-dense", N_("_Extra Dense"), N_("As many rows as fit, the smallest icons") },
         };
         GtkWidget *first = NULL;
 
         group = adw_preferences_group_new ();
         adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (group), _("Density"));
         adw_preferences_group_set_description (ADW_PREFERENCES_GROUP (group),
-                                               _("The list, grid, columns and sidebar. Icon sizes follow the zoom, smaller in Extra Dense."));
+                                               _("The list, grid and columns. The sidebar has its own."));
         for (guint i = 0; i < G_N_ELEMENTS (densities); i++)
         {
             GtkWidget *check = gtk_check_button_new ();
@@ -645,6 +665,21 @@ nautilus_labels_preferences_page_new (void)
             }
             adw_action_row_add_prefix (ADW_ACTION_ROW (row), check);
             adw_action_row_set_activatable_widget (ADW_ACTION_ROW (row), check);
+            adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), row);
+        }
+        {
+            const char *names[] = { _("Comfortable"), _("Compact"), _("Dense"), _("Extra Dense"), NULL };
+            g_autoptr (GtkStringList) list = gtk_string_list_new (names);
+
+            row = adw_combo_row_new ();
+            adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), _("_Sidebar"));
+            adw_preferences_row_set_use_underline (ADW_PREFERENCES_ROW (row), TRUE);
+            adw_combo_row_set_model (ADW_COMBO_ROW (row), G_LIST_MODEL (list));
+            adw_combo_row_set_selected (ADW_COMBO_ROW (row),
+                                        g_settings_get_enum (settings, "sidebar-density"));
+            g_signal_connect (row, "notify::selected", G_CALLBACK (on_sidebar_density_selected), NULL);
+            g_signal_connect_object (settings, "changed::sidebar-density",
+                                     G_CALLBACK (on_sidebar_density_changed), row, 0);
             adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), row);
         }
         adw_preferences_page_add (ADW_PREFERENCES_PAGE (page), ADW_PREFERENCES_GROUP (group));

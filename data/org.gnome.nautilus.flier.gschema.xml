@@ -28,7 +28,12 @@
     <key name="density" enum="org.gnome.nautilus.flier.Density">
       <default>'comfortable'</default>
       <summary>Density</summary>
-      <description>How much room rows and items get in the list, grid, columns and sidebar: “comfortable” as GNOME Files has it, “compact”, “dense” or “extra-dense”. Icon sizes stay as the zoom sets them, except in “extra-dense”, which draws them at three quarters.</description>
+      <description>How much room rows and items get in the list, grid and columns: “comfortable” as GNOME Files has it, “compact”, “dense” or “extra-dense”. The denser ones also draw the icons one standard size smaller (two in “extra-dense”).</description>
+    </key>
+    <key name="sidebar-density" enum="org.gnome.nautilus.flier.Density">
+      <default>'comfortable'</default>
+      <summary>Sidebar density</summary>
+      <description>How tall the rows of the sidebar are, apart from the density of the files.</description>
     </key>
     <key name="folder-color-scheme" enum="org.gnome.nautilus.flier.FolderColorScheme">
       <default>'pastel'</default>
