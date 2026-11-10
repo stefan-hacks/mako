@@ -34,10 +34,12 @@
 #include "nautilus-files-view.h"
 #include "nautilus-enums.h"
 #include "nautilus-icon-info.h"
+#include "nautilus-image.h"
 #include "nautilus-labels.h"
 #include "nautilus-metadata.h"
 #include "nautilus-mime-actions.h"
 #include "nautilus-list-base.h"
+#include "nautilus-list-base-private.h"
 #include "nautilus-list-view.h"
 #include "nautilus-query.h"
 #include "nautilus-view-info.h"
@@ -95,6 +97,8 @@ struct _NautilusColumns
     AdwAnimation *scroll_animation;
     GFile *laid_root;           /* the root the strip was last laid out from */
     gboolean dragging;
+    GFile *previous_location;
+    gboolean select_first;      /* went into a folder: select its first item once loaded */
     int drag_depth;
     int drag_start;             /* the column's width when the drag began */
     double drag_left;           /* the column's left edge then */
@@ -197,17 +201,26 @@ setup_row (GtkSignalListItemFactory *factory,
            GtkListItem              *item,
            gpointer                  user_data)
 {
-    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    /* Like the list view's name cell (spacing, image), so a folder looks
+     * the same here as once it is the middle column. */
+    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
     Column *column = user_data;
-    GtkWidget *icon = gtk_image_new ();
+    GtkWidget *icon = GTK_WIDGET (nautilus_image_new ());
     GtkWidget *label = gtk_label_new (NULL);
 
-    gtk_image_set_pixel_size (GTK_IMAGE (icon), column->icon_size);
+    GtkWidget *frame = gtk_center_box_new ();
+
+    nautilus_image_set_size (NAUTILUS_IMAGE (icon), column->icon_size);
+    gtk_widget_set_valign (icon, GTK_ALIGN_CENTER);
+    /* A square the icon size, the thumbnail centred in it. */
+    gtk_widget_set_size_request (frame, column->icon_size, column->icon_size);
+    gtk_widget_set_valign (frame, GTK_ALIGN_CENTER);
+    gtk_center_box_set_center_widget (GTK_CENTER_BOX (frame), icon);
 
     gtk_label_set_xalign (GTK_LABEL (label), 0);
     gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_MIDDLE);
     gtk_widget_set_hexpand (label, TRUE);
-    gtk_box_append (GTK_BOX (box), icon);
+    gtk_box_append (GTK_BOX (box), frame);
     gtk_box_append (GTK_BOX (box), label);
     gtk_list_item_set_child (item, box);
 
@@ -225,8 +238,9 @@ bind_row (GtkSignalListItemFactory *factory,
 {
     GFileInfo *info = gtk_list_item_get_item (item);
     GtkWidget *box = gtk_list_item_get_child (item);
-    GtkWidget *icon = gtk_widget_get_first_child (box);
-    GtkWidget *label = gtk_widget_get_next_sibling (icon);
+    GtkWidget *frame = gtk_widget_get_first_child (box);
+    GtkWidget *icon = gtk_center_box_get_center_widget (GTK_CENTER_BOX (frame));
+    GtkWidget *label = gtk_widget_get_next_sibling (frame);
 
     Column *column = user_data;
     GIcon *gicon = g_file_info_get_icon (info);
@@ -249,7 +263,19 @@ bind_row (GtkSignalListItemFactory *factory,
             paintable = tinted;
         }
     }
-    gtk_image_set_from_paintable (GTK_IMAGE (icon), paintable);
+    nautilus_image_set_fallback (NAUTILUS_IMAGE (icon), paintable);
+    /* Thumbnails for files, made or loaded the way the list view does. */
+    if (g_file_info_get_file_type (info) == G_FILE_TYPE_REGULAR &&
+        column->icon_size >= NAUTILUS_THUMBNAIL_MINIMUM_ICON_SIZE)
+    {
+        g_autoptr (GFile) location = g_file_get_child (column->directory, g_file_info_get_name (info));
+
+        nautilus_image_set_source (NAUTILUS_IMAGE (icon), location);
+    }
+    else
+    {
+        nautilus_image_set_source (NAUTILUS_IMAGE (icon), NULL);
+    }
     gtk_label_set_text (GTK_LABEL (label), g_file_info_get_display_name (info));
 }
 
@@ -610,6 +636,31 @@ update_child (NautilusColumns *self)
     }
 }
 
+static NautilusFilesView *files_view (NautilusColumns *self);
+
+static void
+select_first_item (NautilusColumns *self)
+{
+    NautilusFilesView *view = files_view (self);
+    NautilusListBase *base;
+    GListModel *model;
+
+    if (!self->select_first || view == NULL || !columns_on (self) ||
+        nautilus_files_view_get_loading (view))
+    {
+        return;
+    }
+    self->select_first = FALSE;
+    base = nautilus_files_view_get_private_list_base (view);
+    model = base != NULL ? G_LIST_MODEL (nautilus_list_base_get_model (base)) : NULL;
+    if (model == NULL || g_list_model_get_n_items (model) == 0 ||
+        nautilus_window_slot_get_selection (self->slot) != NULL)
+    {
+        return;
+    }
+    nautilus_list_base_set_cursor (base, 0, TRUE, TRUE);
+}
+
 static gboolean
 update (gpointer user_data)
 {
@@ -637,6 +688,7 @@ update (gpointer user_data)
     gtk_widget_add_css_class (GTK_WIDGET (self), "columns-on");
     gtk_widget_set_visible (self->child_column, TRUE);
     update_parents (self);
+    select_first_item (self);
     update_child (self);
     g_set_object (&self->laid_root, self->root);
     /* Within the same strip, slide; a new one starts where it belongs. */
@@ -667,6 +719,12 @@ on_location_for_root (NautilusColumns *self)
     {
         return;
     }
+
+    /* Going into a folder within the columns: like Finder, its first item
+     * gets selected, so the highlight is there without pressing Down. */
+    self->select_first = inside && self->previous_location != NULL &&
+                         g_file_has_parent (location, self->previous_location);
+    g_set_object (&self->previous_location, location);
 
     if (!inside || self->root == NULL ||
         !(g_file_equal (location, self->root) || g_file_has_prefix (location, self->root)))
@@ -1033,6 +1091,8 @@ nautilus_columns_set_content (NautilusColumns *self,
 {
     if (self->content != NULL)
     {
+        gtk_widget_remove_css_class (self->content, "miller-content");
+        g_signal_handlers_disconnect_by_data (self->content, self);
         gtk_widget_unparent (self->content);
     }
 
@@ -1040,6 +1100,11 @@ nautilus_columns_set_content (NautilusColumns *self,
 
     if (content != NULL)
     {
+        gtk_widget_add_css_class (content, "miller-content");
+        if (NAUTILUS_IS_FILES_VIEW (content))
+        {
+            g_signal_connect_swapped (content, "notify::loading", G_CALLBACK (select_first_item), self);
+        }
         gtk_widget_insert_before (content, GTK_WIDGET (self), self->child_column);
         gtk_widget_set_hexpand (content, TRUE);
     }
@@ -1567,6 +1632,11 @@ nautilus_columns_dispose (GObject *object)
     g_clear_object (&self->child_item);
     g_clear_object (&self->root);
     g_clear_object (&self->laid_root);
+    g_clear_object (&self->previous_location);
+    if (self->content != NULL)
+    {
+        g_signal_handlers_disconnect_by_data (self->content, self);
+    }
     g_clear_object (&self->scroll_animation);
     g_clear_pointer (&self->parents, g_ptr_array_unref);
     g_clear_pointer (&self->depth_widths, g_array_unref);

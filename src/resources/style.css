@@ -443,10 +443,14 @@ nautilus-columns .miller-column-box { background-color: var(--view-bg-color); }
 nautilus-columns .miller-column-title { padding: 8px 12px 4px 12px; opacity: 0.8; }
 nautilus-columns .miller-column { background: none; }
 nautilus-columns .miller-parent { border-right: 1px solid var(--border-color); }
-nautilus-columns .miller-child { border-left: 1px solid var(--border-color); background-color: var(--view-bg-color); }
+nautilus-columns .miller-child { background-color: var(--view-bg-color); }
 nautilus-columns { background-color: var(--view-bg-color); }
 nautilus-columns .miller-child { border-right: 1px solid var(--border-color); }
 nautilus-columns .miller-content-title { background-color: var(--view-bg-color); }
+/* Every column draws its edge on the right, so a column doesn't shift by
+ * the border when it moves from the right column to the middle one. */
+nautilus-columns.columns-on .miller-content,
+nautilus-columns.columns-on .miller-content-title { border-right: 1px solid var(--border-color); }
 /* The middle column is the real list view; in columns mode its rows look
  * like the side columns' (navigation-sidebar), so moving on doesn't jump. */
 nautilus-columns.columns-on .nautilus-list-view columnview { padding-left: 6px; padding-right: 6px; }
